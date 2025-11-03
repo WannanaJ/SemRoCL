@@ -1,0 +1,36 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.so
+
+# Virtual environment
+.venv/
+env/
+venv/
+*.conda
+*.env
+
+# Logs & debug
+logs/
+*.log
+wandb/
+tensorboard/
+tb_logs/
+
+# Checkpoints & models
+*.pth
+*.pt
+*.ckpt
+checkpoints/
+outputs/
+runs/
+
+# Datasets
+data/
+dataset/
+datasets/
+
+# System files
+.DS_Store
+Thumbs.db

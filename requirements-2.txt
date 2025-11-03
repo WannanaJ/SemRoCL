@@ -1,0 +1,43 @@
+# ===============================
+# SemRoCL (Semantic-guided Robust Contrastive Learning)
+# Environment requirements
+# Verified: Windows 10/11 + Python 3.8~3.10 + CUDA 12.x + RTX 40 series
+# ===============================
+
+# Core frameworks
+torch==2.3.1
+torchvision==0.18.1
+torchaudio==2.3.1
+
+# Data handling
+numpy==1.26.4
+scikit-image==0.22.0
+opencv-python-headless==4.10.0.84
+pillow==10.3.0
+albumentations==1.4.3
+tqdm==4.66.5
+
+# Deep learning models
+transformers==4.41.2
+timm==0.9.16
+huggingface-hub>=0.22.2
+
+# Visualization
+matplotlib==3.9.2
+tensorboard==2.17.0
+
+# Optimization and training tools
+lpips==0.1.4
+einops==0.8.0
+yacs==0.1.8
+pyyaml==6.0.1
+
+# Optional utilities
+scipy==1.13.1
+imageio==2.35.1
+requests==2.32.3
+
+# ===============================
+# Install command:
+# pip install -r requirements.txt
+# ===============================

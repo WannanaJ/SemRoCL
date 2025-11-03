@@ -1,0 +1,227 @@
+================================================================================
+SemRoCL PROJECT MANIFEST
+================================================================================
+
+Project Name: SemRoCL - Semantic-guided Robust Contrastive Learning Framework
+Version: 1.0.0
+Target Deployment: 2026
+License: MIT
+
+================================================================================
+FILE INVENTORY
+================================================================================
+
+ROOT LEVEL FILES:
+----------------
+✅ START_HERE.md                   - Quick start guide (READ THIS FIRST!)
+✅ README.md                       - Comprehensive project documentation
+✅ SETUP_GUIDE.md                  - Detailed setup instructions
+✅ PROJECT_STRUCTURE.txt           - Complete project structure visualization
+✅ environment.yml                 - Conda environment specification
+✅ requirements.txt                - pip package requirements
+✅ MANIFEST.txt                    - This file
+
+SOURCE CODE (src/):
+-------------------
+✅ __init__.py                     - Package initialization
+✅ data_loader.py                  - Dataset loader (paired/unpaired modes)
+✅ utils.py                        - Utility functions and helpers
+✅ loss_functions.py               - Multi-objective loss implementations
+✅ train_stage1_moco.py            - Stage 1 training script
+✅ train_stage2_enhance.py         - Stage 2 training script
+✅ evaluate.py                     - Evaluation script with metrics
+
+MODEL COMPONENTS (src/model/):
+------------------------------
+✅ __init__.py                     - Model package init
+✅ encoder_moco.py                 - MoCo v3 encoder (ResNet backbone)
+✅ semantic_head.py                - SegFormer-B0 + uncertainty estimation
+✅ enhancer.py                     - Pixel-level curve enhancer
+✅ discriminator.py                - PatchGAN discriminator
+
+CONFIGURATION (configs/):
+-------------------------
+✅ train_stage1.yaml               - MoCo pretraining configuration
+✅ train_stage2.yaml               - Enhancement training configuration
+✅ model_config.yaml               - Model architecture configuration
+
+DOCUMENTATION (docs/):
+----------------------
+✅ README_Research.md              - Research plan overview
+✅ Low-Light_Enhancement_Research_Plan_SemRoCL_2026.docx
+                                   - Complete 18-month research plan
+
+DATA STRUCTURE (data/):
+-----------------------
+✅ README.md                       - Dataset documentation
+📁 LIME/                           - LIME dataset folder (empty - to be filled)
+📁 LOL-v1/                         - LOL-v1 dataset folder (empty - to be filled)
+   📁 eval15/high/                 - Evaluation high-light images
+   📁 eval15/low/                  - Evaluation low-light images
+   📁 our485/high/                 - Training high-light images
+   📁 our485/low/                  - Training low-light images
+📁 LOL-v2/                         - LOL-v2 dataset folder (empty - to be filled)
+   📁 Real_captured/Test/          - Real test images
+   📁 Real_captured/Train/         - Real training images
+   📁 Synthetic/Test/              - Synthetic test images
+   📁 Synthetic/Train/             - Synthetic training images
+
+OUTPUT STRUCTURE (outputs/):
+----------------------------
+📁 checkpoints/                    - Model checkpoints (created during training)
+📁 logs/                           - TensorBoard logs (created during training)
+📁 results/                        - Enhanced images (created during inference)
+
+================================================================================
+COMPONENTS SUMMARY
+================================================================================
+
+TOTAL PYTHON FILES: 14
+- Main scripts: 3
+- Model components: 4
+- Utility modules: 3
+- Package inits: 2
+- Data loaders: 1
+- Loss functions: 1
+
+TOTAL CONFIG FILES: 3
+- Stage 1 config: 1
+- Stage 2 config: 1
+- Model config: 1
+
+TOTAL DOCUMENTATION: 7
+- README files: 4
+- Setup guides: 2
+- Research plan: 1
+
+TOTAL DIRECTORIES: 11
+- Source code: 2
+- Configuration: 1
+- Documentation: 1
+- Data: 7 (3 main + 4 subdirs)
+- Outputs: 3
+
+================================================================================
+CODE STATISTICS
+================================================================================
+
+Approximate Lines of Code:
+- encoder_moco.py:        ~350 lines
+- semantic_head.py:       ~250 lines
+- enhancer.py:            ~300 lines
+- discriminator.py:       ~150 lines
+- loss_functions.py:      ~400 lines
+- data_loader.py:         ~200 lines
+- train_stage1_moco.py:   ~150 lines
+- train_stage2_enhance.py:~150 lines
+- evaluate.py:            ~150 lines
+- utils.py:               ~200 lines
+
+TOTAL: ~2,300 lines of Python code
+
+================================================================================
+FEATURES IMPLEMENTED
+================================================================================
+
+✅ MoCo v3 Contrastive Learning
+✅ BYOL Alternative Encoder
+✅ SegFormer-B0 Semantic Segmentation
+✅ Uncertainty Estimation (UIoU)
+✅ Pixel-level Curve Enhancement
+✅ Multi-scale Enhancement
+✅ PatchGAN Discriminator
+✅ Multi-scale Discriminator
+✅ Spectral Normalization
+✅ Color Consistency Loss
+✅ Semantic-guided Loss
+✅ Frequency Domain Loss
+✅ Adversarial Loss
+✅ Task-specific Loss
+✅ Perceptual Loss (LPIPS)
+✅ PSNR/SSIM/LPIPS Evaluation
+✅ TensorBoard Logging
+✅ Checkpoint Management
+✅ Data Augmentation Pipeline
+✅ Paired/Unpaired Dataset Support
+
+================================================================================
+SYSTEM REQUIREMENTS
+================================================================================
+
+MINIMUM:
+- GPU: NVIDIA RTX 2060 (6GB VRAM)
+- RAM: 16GB
+- Storage: 50GB
+- Python: 3.10+
+- CUDA: 11.8+
+
+RECOMMENDED:
+- GPU: NVIDIA RTX 3090 (24GB VRAM)
+- RAM: 32GB
+- Storage: 100GB SSD
+- Python: 3.10
+- CUDA: 11.8
+
+================================================================================
+INSTALLATION STEPS
+================================================================================
+
+1. Copy project to: D:\projects\SemRoCL\
+2. Install environment: conda env create -f environment.yml
+3. Activate environment: conda activate semrocl
+4. Download datasets to data/ folder
+5. Run Stage 1 training: python src/train_stage1_moco.py
+6. Run Stage 2 training: python src/train_stage2_enhance.py
+7. Evaluate results: python src/evaluate.py
+
+================================================================================
+PROJECT STATUS
+================================================================================
+
+✅ Code Implementation: COMPLETE
+✅ Documentation: COMPLETE
+✅ Configuration: COMPLETE
+✅ Project Structure: COMPLETE
+✅ Ready for Use: YES
+
+Next Steps:
+1. Download datasets
+2. Begin training
+3. Evaluate results
+4. Deploy models
+
+================================================================================
+SUPPORT & RESOURCES
+================================================================================
+
+Documentation:
+- START_HERE.md - Quick start
+- README.md - Full documentation
+- SETUP_GUIDE.md - Detailed setup
+- PROJECT_STRUCTURE.txt - Project overview
+
+Research:
+- docs/README_Research.md - Research overview
+- docs/Research_Plan.docx - 18-month research plan
+
+================================================================================
+VERSION HISTORY
+================================================================================
+
+v1.0.0 (October 2025):
+- Initial release
+- Complete two-stage pipeline
+- Full documentation
+- All model components implemented
+- Configuration files included
+
+================================================================================
+LICENSE
+================================================================================
+
+MIT License
+Copyright (c) 2025 SemRoCL Research Team
+
+================================================================================
+END OF MANIFEST
+================================================================================

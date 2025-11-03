@@ -1,0 +1,245 @@
+# Enhanced Stage 2 Configuration with Advanced Features
+# - Multi-scale enhancement
+# - Full semantic guidance  
+# - Adaptive curriculum learning
+
+exp_name: semantic_enhancement_stage2_ENHANCED
+output_dir: outputs
+
+dataset:
+  root_dir: './data/stage2_paired'  # Changed from absolute Windows path
+  datasets: ["LOL-v1", "LOL-v2", "Real-LOLBlue", "FiveK", "LSRW"]
+  img_size: 384
+  mode: paired
+
+model:
+  # Base configuration
+  base_encoder: resnet50
+  pretrained_encoder: outputs/moco_pretrain_stage1/checkpoints/moco_pretrain_final.pth
+  
+  # Enhancement configuration
+  enhancer_channels: 32
+  num_iterations: 8
+  semantic_channels: 64
+  use_semantic: true
+  
+  # NEW: Multi-scale enhancement
+  use_multiscale: true  # Enable multi-scale processing
+  num_scales: 3  # Number of scales (1x, 2x, 4x)
+  
+  # NEW: Semantic guidance
+  use_semantic_guidance: true  # Enable full semantic module
+  num_classes: 19  # Cityscapes classes
+  semantic_pretrained: true  # Use pretrained SegFormer
+  finetune_semantic: false  # Freeze semantic weights initially
+
+training:
+  epochs: 200
+  batch_size: 4  # Reduce to 2 if OOM with multi-scale
+  
+  # Learning rates
+  lr: 0.0001
+  lr_generator: 0.0001
+  lr_semantic: 0.00002  # For semantic fine-tuning (if enabled)
+  lr_discriminator: 0.000005
+  
+  # Training control
+  num_workers: 0
+  save_freq: 5
+  pin_memory: true
+  prefetch_factor: 2
+  persistent_workers: false
+  accumulate_steps: 4
+  
+  # Discriminator control
+  disc_update_freq: 5
+  disc_update_threshold: 0.05
+  disc_start_epoch: 90
+  
+  # Learning rate schedule
+  warmup_epochs: 15
+  use_cosine_schedule: true
+  
+  # FIXED: Improved gradient clipping
+  gradient_clip: 0.5  # Reduced for better stability
+  gradient_clip_discriminator: 2.0  # Separate clip for discriminator
+  gradient_clip_semantic: 0.5
+  
+  use_ema: true
+  ema_decay: 0.999
+  
+  # Label smoothing for GAN
+  label_smoothing: true
+  real_label: 0.9
+  fake_label: 0.1
+
+# Enhanced Curriculum Learning with Adaptive Adjustment
+curriculum:
+  enabled: true
+  
+  # NEW: Adaptive mode
+  adaptive: true  # Enable adaptive weight adjustment
+  smart: true  # Use SmartCurriculumScheduler (more intelligent)
+  
+  # Adaptive parameters
+  adaptive_params:
+    psnr_threshold: 15.0  # PSNR target for phase advancement
+    ssim_threshold: 0.45  # SSIM target for phase advancement
+    patience: 3  # Epochs to wait before adjusting
+    speed_factor: 1.2  # Multiplier for fast progress
+    slow_factor: 0.8  # Multiplier for slow progress
+    min_weight_scale: 0.5  # Minimum weight multiplier
+    max_weight_scale: 1.5  # Maximum weight multiplier
+  
+  # Phase 1: Foundation (Epochs 1-15)
+  phase1:
+    epochs: [1, 15]
+    description: "Foundation - color and exposure stabilization"
+    loss_weights:
+      w_color: 0.001
+      w_semantic: 0.0
+      w_adv: 0.0
+      w_freq: 0.0
+      w_task: 0.0
+      w_perceptual: 0.01
+    monitoring:
+      target_psnr: 11.0
+      target_ssim: 0.25
+      
+  # Phase 2: Gentle semantic intro (Epochs 16-35)
+  phase2:
+    epochs: [16, 35]
+    description: "Gentle semantic introduction"
+    loss_weights:
+      w_color: 0.001
+      w_semantic: [0.0, 0.05]
+      w_adv: 0.0
+      w_freq: 0.0
+      w_task: 0.0
+      w_perceptual: [0.01, 0.05]
+    monitoring:
+      target_psnr: 12.5
+      target_ssim: 0.30
+      
+  # Phase 3: Light semantic (Epochs 36-60)
+  phase3:
+    epochs: [36, 60]
+    description: "Light semantic constraint"
+    loss_weights:
+      w_color: 0.0008
+      w_semantic: [0.05, 0.15]
+      w_adv: 0.0
+      w_freq: 0.00001
+      w_task: 0.0
+      w_perceptual: [0.05, 0.15]
+    monitoring:
+      target_psnr: 14.0
+      target_ssim: 0.38
+      
+  # Phase 4: Moderate semantic (Epochs 61-90)
+  phase4:
+    epochs: [61, 90]
+    description: "Moderate semantic + perceptual"
+    loss_weights:
+      w_color: 0.0005
+      w_semantic: [0.15, 0.30]
+      w_adv: 0.0
+      w_freq: 0.00001
+      w_task: 0.0
+      w_perceptual: [0.15, 0.40]
+    monitoring:
+      target_psnr: 16.0
+      target_ssim: 0.48
+      
+  # Phase 5: Strong semantic + adversarial intro (Epochs 91-130)
+  phase5:
+    epochs: [91, 130]
+    description: "Strong semantic + gentle adversarial"
+    loss_weights:
+      w_color: 0.0003
+      w_semantic: [0.30, 0.50]
+      w_adv: [0.0, 0.02]
+      w_freq: 0.00001
+      w_task: 0.0
+      w_perceptual: [0.40, 0.70]
+    monitoring:
+      target_psnr: 17.5
+      target_ssim: 0.55
+      
+  # Phase 6: Final polish (Epochs 131-200)
+  phase6:
+    epochs: [131, 200]
+    description: "Final polish with full losses"
+    loss_weights:
+      w_color: 0.0002
+      w_semantic: [0.50, 0.60]
+      w_adv: [0.02, 0.05]
+      w_freq: 0.00001
+      w_task: 0.0
+      w_perceptual: [0.70, 1.0]
+    monitoring:
+      target_psnr: 19.0
+      target_ssim: 0.60
+
+# Base Loss Configuration
+loss:
+  w_color: 0.0002
+  w_semantic: 0.60
+  w_adv: 0.05
+  w_freq: 0.00001
+  w_task: 0.0
+  w_perceptual: 1.0
+  
+  color_loss:
+    weight_exp: 10
+    weight_color: 5
+    weight_tv: 200
+
+# Monitoring and Safety
+monitoring:
+  print_freq: 50
+  visualize_freq: 500
+  save_images_freq: 1000
+  check_nan: true
+  
+  max_grad_norm: 10.0  # Maximum acceptable gradient norm
+  
+  phase_transition_check: true
+  rollback_on_failure: false
+  
+  safety:
+    max_psnr_drop: 3.0
+    max_d_loss_low_epochs: 10
+    max_lpips_increase: 0.15
+    nan_check_freq: 10
+    
+    transition_grace_epochs: 5
+    enable_grace_period: true
+    
+    max_total_loss: 50.0
+    loss_explosion_threshold: 10.0
+    
+    stop_on_nan: true
+    stop_on_divergence: false
+
+# Performance Expectations with Enhanced Features:
+# 
+# Multi-scale Enhancement:
+# - Better detail preservation across scales
+# - More robust to varying image resolutions
+# - Expected +1-2 dB PSNR improvement
+# 
+# Full Semantic Guidance:
+# - Structure-aware enhancement
+# - Better preservation of semantic regions
+# - Expected +0.02-0.03 SSIM improvement
+# 
+# Adaptive Curriculum:
+# - Automatic weight adjustment based on progress
+# - Faster convergence (10-20% fewer epochs)
+# - Better final performance
+# 
+# Combined Expected Results:
+# - PSNR: 20-22 dB (vs 19-21 dB baseline)
+# - SSIM: 0.62-0.67 (vs 0.60-0.65 baseline)
+# - Training time: approximately 50 hours (similar, but better quality)

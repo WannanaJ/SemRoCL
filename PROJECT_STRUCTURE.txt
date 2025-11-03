@@ -1,0 +1,181 @@
+SemRoCL/
+│
+├── README.md                          # Main project documentation
+├── SETUP_GUIDE.md                     # Quick start setup guide
+├── environment.yml                    # Conda environment specification
+├── requirements.txt                   # pip requirements
+│
+├── data/                              # Dataset directory
+│   ├── README.md                      # Dataset documentation
+│   ├── LIME/                          # LIME dataset (unpaired)
+│   ├── LOL-v1/                        # LOL version 1
+│   │   ├── eval15/                    # Evaluation set (15 pairs)
+│   │   │   ├── high/                  # Normal-light images
+│   │   │   └── low/                   # Low-light images
+│   │   └── our485/                    # Training set (485 pairs)
+│   │       ├── high/                  # Normal-light images
+│   │       └── low/                   # Low-light images
+│   └── LOL-v2/                        # LOL version 2
+│       ├── Real_captured/             # Real captured images
+│       │   ├── Test/                  # Test split
+│       │   └── Train/                 # Training split
+│       └── Synthetic/                 # Synthetic images
+│           ├── Test/                  # Test split
+│           └── Train/                 # Training split
+│
+├── src/                               # Source code
+│   ├── __init__.py                    # Package initialization
+│   ├── data_loader.py                 # Custom dataset loader (paired/unpaired modes)
+│   ├── utils.py                       # Utility functions
+│   ├── loss_functions.py              # Multi-objective loss functions
+│   ├── train_stage1_moco.py           # Stage 1: MoCo v3 pretraining
+│   ├── train_stage2_enhance.py        # Stage 2: Enhancement training
+│   ├── evaluate.py                    # Evaluation script (PSNR/SSIM/LPIPS)
+│   │
+│   └── model/                         # Model architectures
+│       ├── __init__.py                # Model package init
+│       ├── encoder_moco.py            # MoCo v3 encoder + BYOL alternative
+│       ├── semantic_head.py           # SegFormer-B0 + uncertainty estimation
+│       ├── enhancer.py                # Pixel-level curve enhancer
+│       └── discriminator.py           # PatchGAN discriminator
+│
+├── configs/                           # Configuration files
+│   ├── train_stage1.yaml              # Stage 1 training config
+│   ├── train_stage2.yaml              # Stage 2 training config
+│   └── model_config.yaml              # Model architecture config
+│
+├── outputs/                           # Training outputs
+│   ├── checkpoints/                   # Model checkpoints
+│   ├── logs/                          # TensorBoard logs
+│   └── results/                       # Enhanced images
+│
+└── docs/                              # Documentation
+    ├── README_Research.md             # Research documentation
+    └── Low-Light_Enhancement_Research_Plan_SemRoCL_2026.docx  # Full research plan
+
+================================================================================
+COMPONENT DESCRIPTIONS
+================================================================================
+
+MODEL COMPONENTS:
+-----------------
+1. encoder_moco.py
+   - MoCo v3 contrastive learning encoder
+   - ResNet-18/50 backbone with projection head
+   - Dynamic queue for negative samples
+   - Momentum encoder update mechanism
+   - Optional BYOL-style encoder
+
+2. semantic_head.py
+   - SegFormer-B0 lightweight semantic segmentation
+   - Uncertainty estimation using UIoU
+   - Confidence map generation for dynamic weighting
+   - Multi-scale semantic feature extraction
+
+3. enhancer.py
+   - Zero-DCE inspired curve-based enhancement
+   - Pixel-level illumination adjustment
+   - Semantic feature fusion module
+   - Multi-scale enhancement option
+   - Adaptive enhancement with attention
+
+4. discriminator.py
+   - PatchGAN architecture for local realism
+   - Multi-scale discriminator support
+   - Spectral normalization option
+   - 3-layer default configuration
+
+LOSS FUNCTIONS:
+--------------
+- L_color: Exposure control + color constancy + TV regularization
+- L_semantic: Semantic consistency with uncertainty weighting
+- L_adv: LSGAN/Hinge adversarial loss
+- L_frequency: DCT-based frequency domain consistency
+- L_task: Feature similarity using pretrained backbone
+- L_perceptual: LPIPS perceptual similarity
+
+TRAINING PIPELINE:
+-----------------
+Stage 1 (Unsupervised):
+  Input: Low-light images only
+  Method: MoCo v3 contrastive learning
+  Output: Pretrained universal encoder
+  Duration: ~200 epochs
+
+Stage 2 (Supervised):
+  Input: Paired low/high images
+  Method: Multi-objective optimization with semantic guidance
+  Components: Frozen encoder + semantic head + enhancer + discriminator
+  Output: Enhanced images with semantic awareness
+  Duration: ~100 epochs
+
+EVALUATION METRICS:
+------------------
+- PSNR (Peak Signal-to-Noise Ratio)
+- SSIM (Structural Similarity Index)
+- LPIPS (Learned Perceptual Image Patch Similarity)
+- NIQE (Natural Image Quality Evaluator - no reference)
+- mAP (object detection performance)
+- mIoU (semantic segmentation performance)
+
+================================================================================
+USAGE EXAMPLES
+================================================================================
+
+1. Setup Environment:
+   conda env create -f environment.yml
+   conda activate semrocl
+
+2. Stage 1 Training:
+   cd src
+   python train_stage1_moco.py --config ../configs/train_stage1.yaml
+
+3. Stage 2 Training:
+   python train_stage2_enhance.py --config ../configs/train_stage2.yaml
+
+4. Evaluation:
+   python evaluate.py --config ../configs/train_stage2.yaml \
+       --checkpoint ../outputs/checkpoints/stage2_final.pth
+
+5. Inference:
+   from model.enhancer import CurveEnhancer
+   model = CurveEnhancer().load_checkpoint('checkpoint.pth')
+   enhanced = model(low_light_image)
+
+================================================================================
+KEY FEATURES
+================================================================================
+
+✅ Unsupervised Pretraining     - No paired data required for Stage 1
+✅ Semantic Guidance            - Scene-aware enhancement prioritization
+✅ Uncertainty Estimation       - Dynamic confidence-based weighting
+✅ Multi-Objective Optimization - Balanced loss across multiple domains
+✅ Lightweight Architecture     - Edge-deployable with knowledge distillation
+✅ Interpretable               - Semantic heatmaps and attention visualization
+✅ Robust                      - Handles extreme illumination and noise
+✅ Production Ready            - ONNX/TensorRT export support
+
+================================================================================
+DEPLOYMENT OPTIONS
+================================================================================
+
+1. ONNX Export:
+   python export_onnx.py --checkpoint model.pth --output model.onnx
+
+2. TensorRT Optimization:
+   trtexec --onnx=model.onnx --saveEngine=model.trt --fp16
+
+3. Edge Deployment:
+   - MobileViT-UNet variant for mobile devices
+   - Knowledge distillation for model compression
+   - Quantization support (INT8/FP16)
+
+================================================================================
+RESEARCH MILESTONES (18-Month Plan)
+================================================================================
+
+Phase 1 (Months 1-6):   Framework Construction & Validation
+Phase 2 (Months 7-12):  Robustness Enhancement & Lightweight Deployment
+Phase 3 (Months 13-18): Frontier Expansion & Application Validation
+
+Target: Production-ready deployment by 2026

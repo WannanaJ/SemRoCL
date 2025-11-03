@@ -1,0 +1,31 @@
+name: semrocl
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pytorch>=2.0
+  - torchvision
+  - torchaudio
+  - pytorch-cuda=11.8
+  - numpy
+  - scipy
+  - matplotlib
+  - scikit-image
+  - scikit-learn
+  - opencv
+  - pillow
+  - tqdm
+  - pyyaml
+  - tensorboard
+  - pip
+  - pip:
+    - timm>=0.9.0
+    - lpips
+    - pytorch-msssim
+    - albumentations
+    - einops
+    - transformers
+    - segmentation-models-pytorch
+    # 移除了 opencv-python 和 opencv-contrib-python

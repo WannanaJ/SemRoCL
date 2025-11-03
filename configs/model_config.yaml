@@ -1,0 +1,27 @@
+# Model Architecture Configuration
+
+encoder:
+  type: 'moco_v3'
+  backbone: 'resnet50'
+  feature_dim: 128
+  queue_size: 65536
+  momentum: 0.999
+
+semantic_head:
+  backbone: 'segformer-b0'  # or 'mobilevit'
+  num_classes: 19
+  pretrained: true
+  uncertainty_estimation: true
+
+enhancer:
+  type: 'curve_enhancer'
+  n_channels: 32
+  num_iterations: 8
+  use_semantic: true
+  multi_scale: false
+
+discriminator:
+  type: 'patchgan'
+  n_layers: 3
+  ndf: 64
+  spectral_norm: false
