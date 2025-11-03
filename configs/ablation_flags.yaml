@@ -1,0 +1,6 @@
+# Toggle losses for ablation experiments
+semantic_guidance: true
+frequency_loss: true
+adversarial_loss: true
+task_loss: true
+color_loss: true
