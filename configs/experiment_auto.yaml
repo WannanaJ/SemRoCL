@@ -1,0 +1,99 @@
+experiment:
+  name: semrocl_ablation_multi_dataset
+  description: Auto-generated multi-dataset ablation experiment config
+  model:
+    checkpoint: ./outputs/semantic_enhancement_stage2_ENHANCED/checkpoints/best_model.pth
+    architecture: EnhancedLowLightModel
+  datasets:
+  - name: DICM
+    path: ../../data/stage3_eval\DICM
+    low_dir: .
+    high_dir: ''
+    has_reference: false
+    enabled: true
+  - name: Endo-LowLight
+    path: ../../data/stage3_eval\Endo-LowLight
+    low_dir: .
+    high_dir: ''
+    has_reference: false
+    enabled: true
+  - name: ExDark
+    path: ../../data/stage3_eval\ExDark
+    low_dir: ExDark
+    high_dir: ''
+    has_reference: false
+    enabled: true
+  - name: LOL-v1
+    path: ../../data/stage3_eval\LOL-v1
+    low_dir: eval15\low
+    high_dir: eval15\high
+    has_reference: true
+    enabled: true
+  - name: LOL-v2
+    path: ../../data/stage3_eval\LOL-v2
+    low_dir: Real_captured\Test\Low
+    high_dir: Real_captured\Test\Normal
+    has_reference: true
+    enabled: true
+  - name: LOLBlur
+    path: ../../data/stage3_eval\LOLBlur
+    low_dir: test\low_blur
+    high_dir: test\high_sharp_original
+    has_reference: true
+    enabled: true
+  - name: LSRW
+    path: ../../data/stage3_eval\LSRW
+    low_dir: Eval\Huawei\low
+    high_dir: Eval\Huawei\high
+    has_reference: true
+    enabled: true
+  - name: MEF
+    path: ../../data/stage3_eval\MEF
+    low_dir: .
+    high_dir: ''
+    has_reference: false
+    enabled: true
+  - name: NPE
+    path: ../../data/stage3_eval\NPE
+    low_dir: .
+    high_dir: ''
+    has_reference: false
+    enabled: true
+  - name: VV
+    path: ../../data/stage3_eval\VV
+    low_dir: .
+    high_dir: ''
+    has_reference: false
+    enabled: true
+ablation:
+  use_semantic:
+  - true
+  - false
+  use_freq:
+  - true
+  - false
+  use_gan:
+  - true
+  - false
+  use_curriculum:
+  - true
+  - false
+metrics:
+  full_reference:
+  - psnr
+  - ssim
+  - lpips
+  - delta_e
+  no_reference:
+  - niqe
+  - brisque
+  combined:
+  - hpi
+output:
+  base_dir: ./outputs/ablation_multi_dataset
+  save_images: true
+  save_csv: true
+  save_tex: true
+  save_plots: true
+  image_format: png
+  plot_dpi: 300

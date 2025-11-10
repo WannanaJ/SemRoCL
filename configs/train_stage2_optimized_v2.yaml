@@ -1,0 +1,295 @@
+# ==============================================================================
+# SemRoCL Stage 2 Training - Optimized Version 2
+# Target: PSNR ≥ 25 dB, SSIM ≥ 0.89, LPIPS ≤ 0.05, HPI ≥ 0.92
+# ==============================================================================
+
+experiment:
+  name: semantic_enhancement_stage2_OPTIMIZED_V2
+  description: >
+    Enhanced low-light image enhancement with:
+    1. Advanced perceptual loss (LPIPS + DISTS + Style)
+    2. Retinex-Semantic fusion
+    3. Curve + Transformer hybrid
+    4. Multi-scale semantic supervision
+
+  target_metrics:
+    psnr_min: 24.0
+    psnr_target: 25.0
+    ssim_min: 0.86
+    ssim_target: 0.89
+    lpips_max: 0.07
+    lpips_target: 0.05
+    hpi_min: 0.90
+    hpi_target: 0.92
+
+# ==============================================================================
+# Model Architecture - Optimized
+# ==============================================================================
+model:
+  encoder:
+    type: resnet50
+    pretrained_path: ./outputs/moco_pretrain/checkpoint_latest.pth
+    freeze_bn: false
+
+  # 新增：Retinex-语义融合模块
+  retinex_semantic:
+    enabled: true
+    semantic_guidance_weight: 0.5
+    preserve_boundaries: true
+    decomposition_type: bilateral_space  # 边缘保持分解
+
+  # 新增：曲线-Transformer 混合模块
+  curve_transformer:
+    enabled: true
+    transformer_type: swin_v2_tiny
+    num_curve_points: 8
+    curve_channels: 3
+    window_size: 8
+
+  semantic_head:
+    in_channels: 2048
+    hidden_channels: 512
+    out_channels: 256
+    num_semantic_classes: 19  # Cityscapes classes
+
+  enhancement_decoder:
+    type: unet
+    skip_connections: true
+    attention_gates: true  # 添加注意力门控
+
+# ==============================================================================
+# Loss Functions - Enhanced
+# ==============================================================================
+loss:
+  # 1. 感知损失（多尺度）
+  perceptual:
+    weight: 0.30  # 提高权重
+    lpips_weight: 0.4
+    dists_weight: 0.3
+    style_weight: 0.3
+    layers: [relu1_2, relu2_2, relu3_4, relu4_4]
+
+  # 2. 重建损失（降低权重，避免过度平滑）
+  reconstruction:
+    l1_weight: 0.15
+    l2_weight: 0.05
+    ssim_weight: 0.10
+
+  # 3. Retinex 物理约束
+  retinex:
+    smoothness_weight: 0.08
+    consistency_weight: 0.05
+    reflectance_structure_weight: 0.05
+
+  # 4. 语义一致性
+  semantic:
+    feature_weight: 0.08
+    boundary_weight: 0.05
+
+  # 5. 频域约束
+  frequency:
+    fft_weight: 0.05
+    wavelet_weight: 0.05
+    texture_weight: 0.04
+
+  # 6. 对抗损失
+  adversarial:
+    weight: 0.02
+    discriminator_type: patch_gan
+
+  # 7. 颜色一致性
+  color:
+    histogram_weight: 0.03
+    delta_e_weight: 0.02
+
+# ==============================================================================
+# Training Configuration
+# ==============================================================================
+training:
+  # 数据
+  dataset:
+    train_path: ../../data/LOL-v2/Train
+    val_path: ../../data/LOL-v2/Test
+    paired: true
+
+  # 批次和迭代
+  batch_size: 8  # RTX 3090 可承受
+  num_epochs: 300
+  warmup_epochs: 20
+
+  # 优化器
+  optimizer:
+    type: adamw
+    lr: 0.0001
+    weight_decay: 0.01
+    betas: [0.9, 0.999]
+
+  # 学习率调度
+  scheduler:
+    type: cosine_warmup
+    warmup_epochs: 20
+    min_lr: 0.000001
+
+  # 梯度
+  gradient:
+    clip_norm: 1.0
+    accumulation_steps: 2  # 等效 batch_size=16
+
+  # 混合精度
+  mixed_precision: true
+
+  # 数据增强（训练时）
+  augmentation:
+    horizontal_flip: 0.5
+    vertical_flip: 0.2
+    rotation: 15
+    color_jitter:
+      brightness: 0.2
+      contrast: 0.2
+      saturation: 0.1
+    random_crop: 256
+
+  # 验证
+  validation:
+    frequency: 5  # 每5个epoch验证一次
+    metrics: [psnr, ssim, lpips, niqe, brisque, delta_e, hpi]
+    save_images: true
+    num_vis_samples: 8
+
+# ==============================================================================
+# Curriculum Learning - Optimized
+# ==============================================================================
+curriculum:
+  enabled: true
+  strategy: metric_based
+
+  stages:
+    - name: warm_start
+      epochs: [0, 30]
+      focus: reconstruction
+      loss_weights:
+        reconstruction: 0.5
+        perceptual: 0.3
+        others: 0.2
+
+    - name: perceptual_refinement
+      epochs: [30, 100]
+      focus: perceptual_quality
+      loss_weights:
+        perceptual: 0.4
+        reconstruction: 0.3
+        semantic: 0.15
+        retinex: 0.15
+
+    - name: semantic_enhancement
+      epochs: [100, 200]
+      focus: semantic_consistency
+      loss_weights:
+        semantic: 0.25
+        perceptual: 0.35
+        reconstruction: 0.2
+        retinex: 0.2
+
+    - name: final_polish
+      epochs: [200, 300]
+      focus: all_metrics
+      # 使用配置中的原始权重
+
+# ==============================================================================
+# Output and Checkpoints
+# ==============================================================================
+output:
+  base_dir: ./outputs/semantic_enhancement_stage2_OPTIMIZED_V2
+
+  checkpoints:
+    save_frequency: 10
+    keep_best_n: 5
+    keep_last_n: 3
+    metric_for_best: hpi  # 使用 HPI 作为最佳模型判断标准
+
+  tensorboard:
+    enabled: true
+    log_frequency: 50
+
+  visualization:
+    enabled: true
+    frequency: 100
+    save_format: png
+
+  logging:
+    level: INFO
+    console: true
+    file: true
+
+# ==============================================================================
+# Hardware and Performance
+# ==============================================================================
+hardware:
+  device: cuda
+  num_gpus: 1
+  num_workers: 4
+  pin_memory: true
+
+  # 性能优化
+  cudnn:
+    benchmark: true
+    deterministic: false
+
+  # 分布式训练（如果需要）
+  distributed:
+    enabled: false
+    backend: nccl
+
+# ==============================================================================
+# Evaluation Settings
+# ==============================================================================
+evaluation:
+  metrics:
+    - name: psnr
+      higher_better: true
+      target: 25.0
+
+    - name: ssim
+      higher_better: true
+      target: 0.89
+
+    - name: lpips
+      higher_better: false
+      target: 0.05
+
+    - name: niqe
+      higher_better: false
+      target: 3.4
+
+    - name: brisque
+      higher_better: false
+
+    - name: delta_e
+      higher_better: false
+
+    - name: hpi
+      higher_better: true
+      target: 0.92
+      formula: >
+        0.2 * (PSNR/40) + 0.3 * SSIM + 0.3 * (1-LPIPS) +
+        0.1 * (1-NIQE/10) + 0.1 * (1-DeltaE/50)
+
+  # 早停
+  early_stopping:
+    enabled: true
+    metric: hpi
+    patience: 50
+    min_delta: 0.001
+
+# ==============================================================================
+# Ablation Flags (for experiments)
+# ==============================================================================
+ablation:
+  use_semantic: true
+  use_freq: true
+  use_gan: true
+  use_curriculum: true
+  use_retinex: true  # 新增
+  use_curve_transformer: true  # 新增
+  use_advanced_perceptual: true  # 新增
+  use_multi_scale_supervision: true  # 新增

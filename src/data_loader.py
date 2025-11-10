@@ -11,10 +11,11 @@ import cv2
 import os
 import glob
 import numpy as np
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union, Sized, cast
+from collections import Counter
 from PIL import Image
 import torch
-from torch.utils.data import Dataset, DataLoader, ConcatDataset
+from torch.utils.data import Dataset, DataLoader, ConcatDataset, WeightedRandomSampler
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 import warnings
@@ -32,7 +33,12 @@ def _list_images(root: str) -> List[str]:
     for ext in ("*.png", "*.jpg", "*.jpeg", "*.bmp", "*.tif", "*.tiff",
                 "*.PNG", "*.JPG", "*.JPEG", "*.BMP", "*.TIF", "*.TIFF"):
         for path in glob.glob(os.path.join(root, "**", ext), recursive=True):
+            if "__MACOSX" in path:
+                continue
             norm_path = os.path.normpath(path)
+            base_name = os.path.basename(norm_path)
+            if base_name.startswith("._"):
+                continue
             key = norm_path.lower()
             if key not in seen:
                 seen.add(key)
@@ -55,6 +61,7 @@ class OptimizedLowLightDataset(Dataset):
         cache_images: bool = False,
         use_pil: bool = True,
         strict_mode: bool = False,  # NEW: Raise error on invalid data
+        return_pair: bool = False,  # NEW: return an additional augmented view
     ):
         super().__init__()
         self.root_dir = os.path.normpath(root_dir)
@@ -65,13 +72,16 @@ class OptimizedLowLightDataset(Dataset):
         self.cache_images = cache_images
         self.use_pil = use_pil
         self.strict_mode = strict_mode
-        self.image_cache = {} if cache_images else None
+        self.return_pair = return_pair
+        self.image_cache: Optional[Dict[str, np.ndarray]] = {} if cache_images else None
         
         # NEW: Track failed indices to prevent silent failures
         self.failed_indices = set()
         self.max_failures_threshold = 10
         self.nan_count = 0
         
+        base_name = os.path.basename(self.root_dir).lower()
+
         # Auto-detect subdatasets
         if os.path.basename(self.root_dir) == "stage2_paired":
             subdirs = [
@@ -89,37 +99,94 @@ class OptimizedLowLightDataset(Dataset):
         else:
             self.subdatasets = [self.root_dir]
             self.multi_dataset = False
+
+        # Special handling for nested datasets (e.g., LSRW split by device)
+        if base_name == "lsrw":
+            if self.split == "train":
+                candidates = ["train", "Training data", "Train"]
+            else:
+                candidates = ["test", "Eval", "validation", "Validation", "Test"]
+            split_path = None
+            for name in candidates:
+                candidate_path = os.path.join(self.root_dir, name)
+                if os.path.isdir(candidate_path):
+                    split_path = candidate_path
+                    break
+            if split_path:
+                # If split_path contains multiple device folders (e.g., Huawei/Nikon), treat each separately
+                device_dirs = [
+                    os.path.join(split_path, d)
+                    for d in os.listdir(split_path)
+                    if os.path.isdir(os.path.join(split_path, d))
+                ]
+                # Check if device_dirs actually hold low/high pairs; otherwise, use split_path directly
+                valid_device_dirs = []
+                for d in device_dirs:
+                    has_low = os.path.isdir(os.path.join(d, "low"))
+                    has_high = os.path.isdir(os.path.join(d, "high"))
+                    if has_low and has_high:
+                        valid_device_dirs.append(d)
+                if valid_device_dirs:
+                    self.subdatasets = valid_device_dirs
+                    self.multi_dataset = True
+                else:
+                    self.subdatasets = [split_path]
+                    self.multi_dataset = False
         
         # Collect all image paths
         self.all_low_paths = []
         self.all_high_paths = []
+        self.sample_dataset_ids: List[str] = []
         
         for dataset_dir in self.subdatasets:
             low_dir, high_dir, is_paired = self._infer_structure(dataset_dir, paired)
-            
+
             if not os.path.exists(low_dir):
                 print(f"Warning: Low directory not found: {low_dir}")
                 continue
-            
+
             # Scan files
             low_paths = _list_images(low_dir)
-            high_paths = []
-            
+            high_paths: List[str] = []
+
             if is_paired and high_dir and os.path.exists(high_dir):
                 high_paths = _list_images(high_dir)
                 # Match low and high images by name
                 low_names = {os.path.splitext(os.path.basename(p))[0]: p for p in low_paths}
                 high_names = {os.path.splitext(os.path.basename(p))[0]: p for p in high_paths}
-                
+
                 # Keep only matching pairs
                 common_names = set(low_names.keys()) & set(high_names.keys())
-                low_paths = [low_names[name] for name in sorted(common_names)]
-                high_paths = [high_names[name] for name in sorted(common_names)]
-            
+                if not common_names and ("LOL-v2" in dataset_dir or "LOL-v2" in os.path.basename(dataset_dir)):
+                    # LOL-v2 uses different prefixes (lowXXXX vs normalXXXX); match by numeric suffix
+                    def _normalize_name(name: str) -> str:
+                        digits = "".join(ch for ch in name if ch.isdigit())
+                        return digits if digits else name
+
+                    low_norm = {_normalize_name(name): path for name, path in low_names.items()}
+                    high_norm = {_normalize_name(name): path for name, path in high_names.items()}
+                    common_norm = set(low_norm.keys()) & set(high_norm.keys())
+                    if common_norm:
+                        common_names = sorted(common_norm)
+                        low_paths = [low_norm[name] for name in common_names]
+                        high_paths = [high_norm[name] for name in common_names]
+                    else:
+                        low_paths = []
+                        high_paths = []
+                else:
+                    low_paths = [low_names[name] for name in sorted(common_names)]
+                    high_paths = [high_names[name] for name in sorted(common_names)]
+
             self.all_low_paths.extend(low_paths)
             self.all_high_paths.extend(high_paths if high_paths else [None] * len(low_paths))
-            
-            dataset_name = os.path.basename(dataset_dir)
+
+            relative_path = os.path.relpath(dataset_dir, self.root_dir)
+            if relative_path in (".", ""):
+                dataset_name = os.path.basename(self.root_dir)
+            else:
+                dataset_base = os.path.basename(self.root_dir)
+                dataset_name = f"{dataset_base}/{relative_path}".replace("\\", "/")
+            self.sample_dataset_ids.extend([dataset_name] * len(low_paths))
             print(f"  [{dataset_name}|{self.split}] low={len(low_paths)}, high={len(high_paths) if high_paths else 0}")
         
         self.paired = len(self.all_high_paths) > 0 and self.all_high_paths[0] is not None
@@ -145,15 +212,15 @@ class OptimizedLowLightDataset(Dataset):
                 # Normalize to [0, 1]
                 A.Normalize(mean=(0, 0, 0), std=(1, 1, 1), max_pixel_value=255.0),
                 ToTensorV2()
-            ], additional_targets={'image2': 'image'})
+            ], additional_targets={'image2': 'image'}, is_check_shapes=False)
         else:
             self.transform = A.Compose([
                 A.Resize(self.img_size, self.img_size),
                 A.Normalize(mean=(0, 0, 0), std=(1, 1, 1), max_pixel_value=255.0),
                 ToTensorV2()
-            ], additional_targets={'image2': 'image'})
+            ], additional_targets={'image2': 'image'}, is_check_shapes=False)
     
-    def _infer_structure(self, dataset_dir: str, paired_flag: Optional[bool]) -> Tuple[str, str, bool]:
+    def _infer_structure(self, dataset_dir: str, paired_flag: Optional[bool]) -> Tuple[str, Optional[str], bool]:
         """Infer dataset directory structure"""
         rd = dataset_dir
         
@@ -230,10 +297,10 @@ class OptimizedLowLightDataset(Dataset):
     def _load_image(self, path: str) -> np.ndarray:
         """Load and validate image with improved error handling"""
         if path is None:
-            return None
+            raise ValueError("Image path cannot be None")
         
         # Check cache
-        if self.cache_images and path in self.image_cache:
+        if self.cache_images and self.image_cache is not None and path in self.image_cache:
             return self.image_cache[path].copy()
         
         try:
@@ -268,7 +335,7 @@ class OptimizedLowLightDataset(Dataset):
             img = np.clip(img, 0, 255).astype(np.uint8)
             
             # Cache if enabled
-            if self.cache_images:
+            if self.cache_images and self.image_cache is not None:
                 self.image_cache[path] = img.copy()
             
             return img
@@ -281,7 +348,7 @@ class OptimizedLowLightDataset(Dataset):
     def __len__(self) -> int:
         return len(self.all_low_paths)
     
-    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+    def __getitem__(self, idx: int) -> Dict[str, Union[torch.Tensor, str]]:
         """Get item with improved error handling"""
         try:
             low_path = self.all_low_paths[idx]
@@ -296,14 +363,24 @@ class OptimizedLowLightDataset(Dataset):
                 transformed = self.transform(image=low_img, image2=high_img)
                 low_tensor = transformed['image']
                 high_tensor = transformed['image2']
+                second_view = None
+                if self.return_pair:
+                    transformed_pair = self.transform(image=low_img, image2=high_img)
+                    second_view = transformed_pair['image']
             else:
                 transformed = self.transform(image=low_img)
                 low_tensor = transformed['image']
                 high_tensor = low_tensor.clone()
+                second_view = None
+                if self.return_pair:
+                    transformed_pair = self.transform(image=low_img)
+                    second_view = transformed_pair['image']
             
             # Ensure correct type
             low_tensor = low_tensor.float()
             high_tensor = high_tensor.float()
+            if second_view is not None:
+                second_view = second_view.float()
             
             # Final safety check (single point, after transform)
             if torch.isnan(low_tensor).any() or torch.isinf(low_tensor).any():
@@ -315,12 +392,18 @@ class OptimizedLowLightDataset(Dataset):
             # Clamp to [0, 1]
             low_tensor = torch.clamp(low_tensor, 0, 1)
             high_tensor = torch.clamp(high_tensor, 0, 1)
+            if second_view is not None:
+                second_view = torch.clamp(second_view, 0, 1)
             
-            return {
+            sample = {
                 'low': low_tensor,
                 'high': high_tensor,
                 'low_path': low_path
             }
+            if second_view is not None:
+                sample['low_pair'] = second_view
+            
+            return sample
             
         except Exception as e:
             # Track failures
@@ -385,19 +468,78 @@ def get_dataloader(cfg: dict, split="train") -> DataLoader:
             cache_images=False,
             use_pil=True
         )
-    
+
     # Create dataloader
     num_workers = 0 if os.name == 'nt' else train_cfg.get("num_workers", 4)
-    
-    return DataLoader(
-        dataset,
+    sampler = None
+    shuffle = (split == "train")
+
+    dataset_counts: Counter[str] = Counter()
+
+    def update_counts(ds_obj):
+        ids = getattr(ds_obj, "sample_dataset_ids", None)
+        if ids:
+            dataset_counts.update(ids)
+        else:
+            name = getattr(ds_obj, "root_dir", "dataset")
+            dataset_counts[name] += len(ds_obj)
+
+    if isinstance(dataset, ConcatDataset):
+        for sub_ds in dataset.datasets:
+            update_counts(sub_ds)
+    else:
+        update_counts(dataset)
+
+    def resolve_weight(name: Optional[str]) -> float:
+        return 1.0
+
+    if split == "train":
+        weight_cfg = ds_cfg.get("sample_weights")
+        if weight_cfg:
+            def resolve_weight(name: Optional[str]) -> float:
+                if not name:
+                    return float(weight_cfg.get("default", 1.0))
+                key = name.split("/")[-1]
+                return float(weight_cfg.get(name, weight_cfg.get(key, weight_cfg.get("default", 1.0))))
+
+            weights: List[float] = []
+            if isinstance(dataset, ConcatDataset):
+                for sub_ds in dataset.datasets:
+                    ids = getattr(sub_ds, "sample_dataset_ids", None)
+                    if ids is None:
+                        weights.extend([float(weight_cfg.get("default", 1.0))] * len(cast(Sized, sub_ds)))
+                    else:
+                        weights.extend([resolve_weight(tag) for tag in ids])
+            else:
+                ids = getattr(dataset, "sample_dataset_ids", None)
+                if ids is None:
+                    weights = [float(weight_cfg.get("default", 1.0))] * len(cast(Sized, dataset))
+                else:
+                    weights = [resolve_weight(tag) for tag in ids]
+
+            if len(weights) > 0:
+                sampler = WeightedRandomSampler(weights, num_samples=len(weights), replacement=True)  # type: ignore[arg-type]
+                shuffle = False
+
+        print("[Stage1] Dataset sampling summary:")
+        for name, count in dataset_counts.items():
+            print(f"  - {name}: samples={count}, weight={resolve_weight(name):.2f}")
+
+    dataloader_kwargs: Dict[str, Any] = dict(
         batch_size=train_cfg["batch_size"],
-        shuffle=(split == "train"),
         num_workers=num_workers,
         pin_memory=train_cfg.get("pin_memory", True) and torch.cuda.is_available(),
         drop_last=(split == "train"),
         persistent_workers=False if num_workers == 0 else train_cfg.get("persistent_workers", False),
-        prefetch_factor=2 if num_workers > 0 else None
+    )
+    if num_workers > 0:
+        dataloader_kwargs["prefetch_factor"] = 2
+
+    return DataLoader(
+        dataset,
+        shuffle=shuffle if sampler is None else False,
+        sampler=sampler,
+        **dataloader_kwargs,
     )
 
 
@@ -435,3 +577,7 @@ if __name__ == "__main__":
         print("\nData loader working correctly!")
     except Exception as e:
         print(f"Error: {e}")
+
+
+# Compatibility alias for Stage 1
+LowLightDataset = OptimizedLowLightDataset

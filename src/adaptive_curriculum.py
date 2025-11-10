@@ -4,7 +4,7 @@ Dynamically adjusts loss weights based on validation metrics
 """
 
 import numpy as np
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 import json
 import os
 
@@ -15,7 +15,7 @@ class AdaptiveCurriculumScheduler:
     Adjusts loss weights dynamically based on training progress
     """
     
-    def __init__(self, config: Dict, save_dir: str = None):
+    def __init__(self, config: Dict, save_dir: Optional[str] = None):
         """
         Args:
             config: Training configuration
@@ -245,7 +245,7 @@ class AdaptiveCurriculumScheduler:
         
         print(f"  ✓ Saved curriculum history to {history_path}")
     
-    def plot_history(self, save_path: str = None):
+    def plot_history(self, save_path: Optional[str] = None):
         """
         Plot curriculum history
         
@@ -316,7 +316,7 @@ class SmartCurriculumScheduler(AdaptiveCurriculumScheduler):
     Enhanced adaptive scheduler with more intelligent strategies
     """
     
-    def __init__(self, config: Dict, save_dir: str = None):
+    def __init__(self, config: Dict, save_dir: Optional[str] = None):
         super().__init__(config, save_dir)
         
         # Additional tracking for smart decisions

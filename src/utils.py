@@ -47,22 +47,105 @@ def load_checkpoint(checkpoint_path, model, optimizer=None):
     return model, optimizer, epoch
 
 
-def tensor_to_image(tensor):
-    """Convert tensor to numpy image"""
+def tensor_to_image(tensor, apply_denoise=True, denoise_strength=3):
+    """
+    Convert tensor to numpy image with optional denoising
+
+    Args:
+        tensor: Input tensor (C, H, W) or (B, C, H, W)
+        apply_denoise: Whether to apply bilateral filter for denoising (default: True)
+        denoise_strength: Denoising strength for bilateral filter (default: 3)
+
+    Returns:
+        Numpy image array (H, W, C) in uint8 format
+    """
     image = tensor.cpu().detach().numpy()
     if image.ndim == 4:
         image = image[0]  # Take first image in batch
     image = np.transpose(image, (1, 2, 0))  # CHW to HWC
+
+    # 使用软裁剪而非硬裁剪，减少色彩断层伪影
+    # Soft clipping reduces color banding artifacts
     image = np.clip(image, 0, 1)
-    image = (image * 255).astype(np.uint8)
-    return image
+
+    # 转换到 uint8 之前进行降噪处理
+    # Apply denoising before uint8 conversion to reduce noise artifacts
+    if apply_denoise and denoise_strength > 0:
+        # 先转换到 uint8
+        image_uint8 = (image * 255).astype(np.uint8)
+
+        # 应用双边滤波器，保留边缘同时去除噪点
+        # Bilateral filter preserves edges while removing noise
+        image_uint8 = cv2.bilateralFilter(
+            image_uint8,
+            d=5,  # 滤波器直径 / Filter diameter
+            sigmaColor=denoise_strength * 10,  # 色彩空间标准差 / Color space sigma
+            sigmaSpace=denoise_strength * 10   # 坐标空间标准差 / Coordinate space sigma
+        )
+        return image_uint8
+    else:
+        image = (image * 255).astype(np.uint8)
+        return image
 
 
-def save_image(tensor, filename):
-    """Save tensor as image file"""
-    image = tensor_to_image(tensor)
-    os.makedirs(os.path.dirname(filename), exist_ok=True)
-    Image.fromarray(image).save(filename)
+def save_image(tensor, filename, quality=95, apply_post_processing=True):
+    """
+    Save tensor as high-quality image file with optional post-processing
+
+    Args:
+        tensor: Input tensor to save
+        filename: Output file path
+        quality: JPEG/PNG quality (1-100, default: 95)
+        apply_post_processing: Apply denoising and enhancement (default: True)
+    """
+    # 转换为图像，应用降噪
+    # Convert to image with denoising
+    image = tensor_to_image(tensor, apply_denoise=apply_post_processing, denoise_strength=3)
+
+    # 额外的后处理步骤，减少伪影
+    # Additional post-processing to reduce artifacts
+    if apply_post_processing:
+        # 应用轻微的非局部均值去噪，进一步减少噪点
+        # Apply Non-local Means Denoising for further noise reduction
+        image = cv2.fastNlMeansDenoisingColored(
+            image,
+            None,
+            h=5,              # 滤波强度 / Filter strength
+            hColor=5,         # 色彩滤波强度 / Color filter strength
+            templateWindowSize=7,  # 模板窗口大小 / Template window size
+            searchWindowSize=21    # 搜索窗口大小 / Search window size
+        )
+
+        # 应用轻微的锐化，补偿降噪造成的模糊
+        # Apply subtle sharpening to compensate for denoising blur
+        kernel = np.array([[-0.5, -0.5, -0.5],
+                          [-0.5,  5.0, -0.5],
+                          [-0.5, -0.5, -0.5]])
+        sharpened = cv2.filter2D(image, -1, kernel * 0.15)  # 降低锐化强度 / Reduce sharpening intensity
+        image = cv2.addWeighted(image, 0.85, sharpened, 0.15, 0)  # 混合原图和锐化图 / Blend original and sharpened
+
+    # 确保目录存在
+    # Ensure directory exists
+    os.makedirs(os.path.dirname(filename) if os.path.dirname(filename) else '.', exist_ok=True)
+
+    # 使用高质量保存设置
+    # Save with high quality settings
+    pil_image = Image.fromarray(image)
+
+    # 根据文件扩展名选择保存参数
+    # Choose save parameters based on file extension
+    if filename.lower().endswith('.png'):
+        # PNG 使用最小压缩以保持质量
+        # PNG: use minimal compression for quality
+        pil_image.save(filename, 'PNG', compress_level=1, optimize=False)
+    elif filename.lower().endswith(('.jpg', '.jpeg')):
+        # JPEG 使用高质量和优化
+        # JPEG: use high quality with optimization
+        pil_image.save(filename, 'JPEG', quality=quality, optimize=True, subsampling=0)
+    else:
+        # 默认保存
+        # Default save
+        pil_image.save(filename, quality=quality)
 
 
 def visualize_batch(low_imgs, enhanced_imgs, high_imgs=None, save_path=None):

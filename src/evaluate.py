@@ -15,9 +15,10 @@ import argparse
 from tqdm import tqdm
 
 from src.data_loader import LowLightDataset
-from model.enhancer import CurveEnhancer
-from model.semantic_head import SemanticHead
+from src.model.enhancer import CurveEnhancer
+from src.model.semantic_head import SemanticHead
 from utils import *
+from metrics_utils import compute_delta_e, maybe_compute_niqe, maybe_compute_brisque
 
 
 def calculate_psnr(img1, img2):
@@ -52,8 +53,13 @@ def evaluate(config):
     
     # Load test data
     test_loader = DataLoader(
-        LowLightDataset(config['dataset']['root_dir'], mode='paired', 
-                       split='test', img_size=config['dataset']['img_size'], augment=False),
+        LowLightDataset(
+            config['dataset']['root_dir'],
+            split='test',
+            paired=True,
+            img_size=config['dataset']['img_size'],
+            augment=False,
+        ),
         batch_size=1, shuffle=False, num_workers=2
     )
     
@@ -64,6 +70,9 @@ def evaluate(config):
     psnr_scores = []
     ssim_scores = []
     lpips_scores = []
+    delta_e_scores = []
+    niqe_scores = []
+    brisque_scores = []
     
     # Evaluation loop
     print("Evaluating...")
@@ -82,6 +91,7 @@ def evaluate(config):
             # Calculate metrics
             psnr_val = calculate_psnr(enhanced, high)
             ssim_val = calculate_ssim(enhanced, high)
+            delta_e_val = compute_delta_e(enhanced, high).item()
             
             # LPIPS
             enhanced_norm = enhanced * 2 - 1
@@ -91,23 +101,56 @@ def evaluate(config):
             psnr_scores.append(psnr_val)
             ssim_scores.append(ssim_val)
             lpips_scores.append(lpips_val)
+            delta_e_scores.append(delta_e_val)
             
-            # Save result
+            niqe_val = maybe_compute_niqe(enhanced)
+            if niqe_val is not None:
+                niqe_scores.append(float(niqe_val))
+            
+            brisque_val = maybe_compute_brisque(enhanced)
+            if brisque_val is not None:
+                brisque_scores.append(float(brisque_val))
+            
+            # 保存结果（使用高质量设置减少伪影和噪点）
+            # Save result with high quality settings to reduce artifacts and noise
             if config.get('save_results'):
                 filename = batch['filename'][0]
                 save_path = os.path.join(config['output_dir'], filename)
-                save_image(enhanced, save_path)
+
+                # 使用高质量保存，应用后处理减少伪影
+                # Use high-quality save with post-processing to reduce artifacts
+                save_image(
+                    enhanced,
+                    save_path,
+                    quality=95,  # 高质量 JPEG/PNG / High quality
+                    apply_post_processing=True  # 应用降噪和锐化 / Apply denoising and sharpening
+                )
     
     # Print results
     print(f"\nEvaluation Results:")
-    print(f"Average PSNR: {np.mean(psnr_scores):.2f} ± {np.std(psnr_scores):.2f}")
-    print(f"Average SSIM: {np.mean(ssim_scores):.4f} ± {np.std(ssim_scores):.4f}")
-    print(f"Average LPIPS: {np.mean(lpips_scores):.4f} ± {np.std(lpips_scores):.4f}")
+    def _fmt(metric_list):
+        return f"{np.mean(metric_list):.4f} ± {np.std(metric_list):.4f}" if metric_list else "N/A"
+    
+    print(f"Average PSNR: {_fmt(psnr_scores)}")
+    print(f"Average SSIM: {_fmt(ssim_scores)}")
+    print(f"Average LPIPS: {_fmt(lpips_scores)}")
+    print(f"Average DeltaE (lower better): {_fmt(delta_e_scores)}")
+    if niqe_scores:
+        print(f"Average NIQE (naturalness, lower better): {_fmt(niqe_scores)}")
+    else:
+        print("Average NIQE: N/A (piq not installed)")
+    if brisque_scores:
+        print(f"Average BRISQUE (naturalness, lower better): {_fmt(brisque_scores)}")
+    else:
+        print("Average BRISQUE: N/A (piq not installed)")
     
     return {
-        'psnr': np.mean(psnr_scores),
-        'ssim': np.mean(ssim_scores),
-        'lpips': np.mean(lpips_scores)
+        'psnr': float(np.mean(psnr_scores)),
+        'ssim': float(np.mean(ssim_scores)),
+        'lpips': float(np.mean(lpips_scores)),
+        'delta_e': float(np.mean(delta_e_scores)),
+        'niqe': float(np.mean(niqe_scores)) if niqe_scores else None,
+        'brisque': float(np.mean(brisque_scores)) if brisque_scores else None
     }
 
 

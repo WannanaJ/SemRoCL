@@ -1,0 +1,266 @@
+# Optimized Enhanced Stage 2 Configuration
+# Based on train_stage2_enhanced.yaml with performance improvements
+
+exp_name: semantic_enhancement_stage2_ENHANCED_OPT
+output_dir: outputs
+
+dataset:
+  root_dir: './data/stage2_paired'
+  datasets: ["LOL-v1", "LOL-v2", "FiveK", "LSRW"]
+  img_size: 384
+  mode: paired
+
+model:
+  # Base configuration
+  base_encoder: resnet50
+  pretrained_encoder: outputs/moco_pretrain_stage1/checkpoints/moco_pretrain_final.pth
+
+  # Enhancement configuration
+  enhancer_channels: 32
+  num_iterations: 8
+  lightweight: true
+  channel_multiplier: 0.75
+  use_depthwise: true
+  use_noise_gate: true
+  semantic_channels: 64
+  use_semantic: true
+
+  # Multi-scale enhancement
+  use_multiscale: true
+  num_scales: 3
+
+  # Semantic guidance
+  use_semantic_guidance: true
+  num_classes: 19
+  semantic_pretrained: true
+  finetune_semantic: false
+  semantic_feature_dim: 64
+  semantic_downsample: 2
+  semantic_conf_threshold: 0.35
+  noise_gate_kernel: 5
+
+training:
+  epochs: 200
+  batch_size: 4
+
+  # Learning rates
+  lr: 0.0001
+  lr_generator: 0.0001
+  lr_semantic: 0.00002
+  lr_discriminator: 0.000005
+
+  # OPTIMIZED: Training control
+  num_workers: 4              # Changed from 0 -> +30% speed
+  save_freq: 5
+  pin_memory: true
+  prefetch_factor: 3          # Changed from 2 -> better prefetching
+  persistent_workers: true    # Changed from false -> reduce overhead
+  accumulate_steps: 4
+
+  # Discriminator control
+  disc_update_freq: 5
+  disc_update_threshold: 0.05
+  disc_start_epoch: 50
+
+  # Learning rate schedule
+  warmup_epochs: 15
+  use_cosine_schedule: true
+
+  # Gradient clipping
+  gradient_clip: 0.5
+  gradient_clip_discriminator: 2.0
+  gradient_clip_semantic: 0.5
+
+  use_ema: true
+  ema_decay: 0.999
+
+  # Label smoothing for GAN
+  label_smoothing: true
+  real_label: 0.9
+  fake_label: 0.1
+
+# Enhanced Curriculum Learning
+curriculum:
+  enabled: true
+  adaptive: true
+  smart: true
+
+  adaptive_params:
+    psnr_threshold: 15.0
+    ssim_threshold: 0.45
+    patience: 3
+    speed_factor: 1.2
+    slow_factor: 0.8
+    min_weight_scale: 0.5
+    max_weight_scale: 1.5
+
+  # Phase 1: Foundation (Epochs 1-15)
+  phase1:
+    epochs: [1, 15]
+    description: "Foundation - color and exposure stabilization"
+    loss_weights:
+      w_color: 0.0020          # OPTIMIZED: Increased from 0.0015
+      w_semantic: 0.0
+      w_adv: 0.0
+      w_freq: 0.00002
+      w_noise: 0.0001
+      w_task: 0.0
+      w_perceptual: 0.004
+      w_recon: 1.0
+      w_brightness: 0.5
+    monitoring:
+      target_psnr: 11.0
+      target_ssim: 0.25
+
+  # Phase 2: Gentle semantic intro (Epochs 16-35)
+  phase2:
+    epochs: [16, 35]
+    description: "Gentle semantic introduction"
+    loss_weights:
+      w_color: 0.0015          # OPTIMIZED: Increased from 0.001
+      w_semantic: [0.0, 0.03]
+      w_adv: 0.0
+      w_freq: [0.00002, 0.00004]
+      w_noise: [0.0001, 0.00015]
+      w_task: 0.0
+      w_perceptual: [0.005, 0.02]
+      w_recon: [1.0, 0.8]
+      w_brightness: [0.4, 0.3]
+    monitoring:
+      target_psnr: 12.5
+      target_ssim: 0.30
+
+  # Phase 3: Light semantic (Epochs 36-60) - CURRENT PHASE
+  phase3:
+    epochs: [36, 60]
+    description: "Light semantic constraint"
+    loss_weights:
+      w_color: 0.0012          # OPTIMIZED: Increased from 0.0008
+      w_semantic: [0.03, 0.12]
+      w_adv: [0.0, 0.01]
+      w_freq: [0.00004, 0.00007]
+      w_noise: [0.00015, 0.00022]
+      w_task: 0.0
+      w_perceptual: [0.02, 0.1]
+      w_recon: [0.8, 0.6]
+      w_brightness: [0.3, 0.25]
+    monitoring:
+      target_psnr: 14.0
+      target_ssim: 0.38
+
+  # Phase 4: Moderate semantic (Epochs 61-90)
+  phase4:
+    epochs: [61, 90]
+    description: "Moderate semantic + perceptual"
+    loss_weights:
+      w_color: 0.0008          # OPTIMIZED: Increased from 0.0005
+      w_semantic: [0.12, 0.25]
+      w_adv: [0.01, 0.025]
+      w_freq: [0.00007, 0.00012]
+      w_noise: [0.00022, 0.00028]
+      w_task: 0.0
+      w_perceptual: [0.1, 0.25]
+      w_recon: [0.6, 0.5]
+      w_brightness: [0.25, 0.2]
+    monitoring:
+      target_psnr: 16.0
+      target_ssim: 0.48
+
+  # Phase 5: Strong semantic + adversarial intro (Epochs 91-130)
+  phase5:
+    epochs: [91, 130]
+    description: "Strong semantic + gentle adversarial"
+    loss_weights:
+      w_color: 0.0005          # OPTIMIZED: Increased from 0.0003
+      w_semantic: [0.25, 0.45]
+      w_adv: [0.02, 0.05]
+      w_freq: [0.00012, 0.00018]
+      w_noise: [0.00028, 0.00035]
+      w_task: 0.0
+      w_perceptual: [0.25, 0.5]
+      w_recon: [0.5, 0.35]
+      w_brightness: [0.2, 0.15]
+    monitoring:
+      target_psnr: 17.5
+      target_ssim: 0.55
+
+  # Phase 6: Final polish (Epochs 131-200)
+  phase6:
+    epochs: [131, 200]
+    description: "Final polish with full losses"
+    loss_weights:
+      w_color: 0.0003          # OPTIMIZED: Increased from 0.0002
+      w_semantic: [0.50, 0.60]
+      w_adv: [0.02, 0.05]
+      w_freq: [0.00018, 0.00025]
+      w_noise: [0.00035, 0.00045]
+      w_task: 0.0
+      w_perceptual: [0.5, 0.8]
+      w_recon: [0.35, 0.25]
+      w_brightness: [0.15, 0.1]
+    monitoring:
+      target_psnr: 19.0
+      target_ssim: 0.60
+
+# OPTIMIZED: Base Loss Configuration
+loss:
+  w_color: 0.0003            # Increased from 0.0002
+  w_semantic: 0.60
+  w_adv: 0.05
+  w_freq: 0.00008
+  w_noise: 0.00025
+  w_task: 0.0
+  w_perceptual: 0.6
+  w_recon: 1.0
+  w_brightness: 0.2
+
+  color_loss:
+    weight_exp: 10           # OPTIMIZED: Increased from 8
+    weight_color: 8          # OPTIMIZED: Increased from 5
+    weight_tv: 210           # Increased to suppress noise further
+
+# Monitoring and Safety
+monitoring:
+  print_freq: 50
+  visualize_freq: 500
+  save_images_freq: 1000
+  metrics_interval: 50
+  check_nan: true
+
+  max_grad_norm: 10.0
+
+  phase_transition_check: true
+  rollback_on_failure: false
+
+  perception_metrics:
+    color: ['delta_e']
+    natural: ['niqe', 'brisque']
+    note: "DeltaE measures color deviation, while NIQE/BRISQUE capture naturalness to emphasize perceptual quality"
+
+  safety:
+    max_psnr_drop: 3.0
+    max_d_loss_low_epochs: 10
+    max_lpips_increase: 0.15
+    nan_check_freq: 10
+
+    transition_grace_epochs: 5
+    enable_grace_period: true
+    max_total_loss: 50.0
+    loss_explosion_threshold: 10.0
+
+    stop_on_nan: true
+    stop_on_divergence: false
+
+# OPTIMIZATION NOTES:
+# 1. num_workers: 0 -> 4 (Expected +30-40% training speed)
+# 2. persistent_workers: false -> true (Reduce worker initialization overhead)
+# 3. prefetch_factor: 2 -> 3 (Better GPU utilization)
+# 4. color_loss weights increased (Better color consistency, reduce Delta E)
+# 5. Phase-wise w_color increased 50% (Smoother color transitions)
+#
+# Expected improvements:
+# - Training speed: 2-20 img/s -> 15-25 img/s (more stable)
+# - Delta E: 9.75-22.75 -> 8-16 (better consistency)
+# - Epoch time: ~2h -> ~1.3h (35% faster)
+# - Final PSNR: 20-22 dB (unchanged)
+# - Final SSIM: 0.65-0.70 (slight improvement from +0.03)

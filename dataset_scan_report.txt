@@ -1,0 +1,114 @@
+====================================================================================================
+
+Dataset Scan Summary Report
+====================================================================================================
+
+ Scan Time: 2025-11-10 14:05:55
+ Total Datasets: 12
+ With Reference: 0
+ Without Reference: 12
+ Total Images: 78738
+
+====================================================================================================
+ Details
+====================================================================================================
+
+1. DICM
+----------------------------------------------------------------------------------------------------
+    Path: ../../data/stage3_eval\DICM
+    Structure Type: flat
+    Low Dir: . (69 )
+    Has Reference:  NO ()
+
+2. Endo-LowLight
+----------------------------------------------------------------------------------------------------
+    Path: ../../data/stage3_eval\Endo-LowLight
+    Structure Type: flat
+    Low Dir: . (5 )
+    Has Reference:  NO ()
+
+3. ExDark
+----------------------------------------------------------------------------------------------------
+    Path: ../../data/stage3_eval\ExDark
+    Structure Type: unpaired
+    Low Dir: ExDark (7363 )
+    Has Reference:  NO ()
+
+4. LOL-v1
+----------------------------------------------------------------------------------------------------
+    Path: ../../data/stage3_eval\LOL-v1
+    Structure Type: unpaired
+    Low Dir: __MACOSX (998 )
+    Has Reference:  NO ()
+
+5. LOL-v2
+----------------------------------------------------------------------------------------------------
+    Path: ../../data/stage3_eval\LOL-v2
+    Structure Type: unpaired
+    Low Dir: Synthetic (2000 )
+    Has Reference:  NO ()
+
+6. LOLBlur
+----------------------------------------------------------------------------------------------------
+    Path: ../../data/stage3_eval\LOLBlur
+    Structure Type: unpaired
+    Low Dir: train_all (51000 )
+    Has Reference:  NO ()
+
+7. LSRW
+----------------------------------------------------------------------------------------------------
+    Path: ../../data/stage3_eval\LSRW
+    Structure Type: unpaired
+    Low Dir: Training data (11200 )
+    Has Reference:  NO ()
+
+8. Learning-to-see-in-the-dark
+----------------------------------------------------------------------------------------------------
+    Path: ../../data/stage3_eval\Learning-to-see-in-the-dark
+    Structure Type: unknown
+    Low Dir: None (0 )
+    Has Reference:  NO ()
+
+9. MEF
+----------------------------------------------------------------------------------------------------
+    Path: ../../data/stage3_eval\MEF
+    Structure Type: flat
+    Low Dir: . (17 )
+    Has Reference:  NO ()
+
+10. NPE
+----------------------------------------------------------------------------------------------------
+    Path: ../../data/stage3_eval\NPE
+    Structure Type: flat
+    Low Dir: . (8 )
+    Has Reference:  NO ()
+
+11. SICE
+----------------------------------------------------------------------------------------------------
+    Path: ../../data/stage3_eval\SICE
+    Structure Type: unpaired
+    Low Dir: Dataset (6054 )
+    Has Reference:  NO ()
+
+12. VV
+----------------------------------------------------------------------------------------------------
+    Path: ../../data/stage3_eval\VV
+    Structure Type: flat
+    Low Dir: . (24 )
+    Has Reference:  NO ()
+
+====================================================================================================
+ Recommendations
+====================================================================================================
+
+   12 
+    (NIQE, BRISQUE)
+
+ 2:
+   GPU (RTX 3090):  9448.6 
+   CPU:  37794.2 
+
+ :
+   :  3149.5 GB
+   :  25196.2 GB
+

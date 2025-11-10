@@ -1,19 +1,48 @@
+# ==========================================
+# SemRoCL Requirements
+# Semantic-aware Robust Contrastive Learning for Low-Light Image Enhancement
+# ==========================================
+
+# Core Deep Learning Frameworks
+# 核心深度学习框架
 torch>=2.0.0
 torchvision>=0.15.0
-numpy>=1.23.0
+
+# Computer Vision & Image Processing
+# 计算机视觉和图像处理
 opencv-python>=4.7.0
 opencv-contrib-python>=4.7.0
 pillow>=9.5.0
 scikit-image>=0.20.0
-scikit-learn>=1.2.0
-matplotlib>=3.7.0
-tqdm>=4.65.0
-pyyaml>=6.0
-tensorboard>=2.12.0
-timm>=0.9.0
-lpips>=0.1.4
-pytorch-msssim>=0.2.1
 albumentations>=1.3.0
-einops>=0.6.1
-transformers>=4.28.0
-segmentation-models-pytorch>=0.3.2
+
+# Scientific Computing
+# 科学计算
+numpy>=1.23.0
+scikit-learn>=1.2.0
+
+# Visualization & Logging
+# 可视化和日志
+matplotlib>=3.7.0
+tensorboard>=2.12.0
+tqdm>=4.65.0
+
+# Configuration & Utils
+# 配置和工具
+pyyaml>=6.0
+
+# Model Components
+# 模型组件
+timm>=0.9.0  # Vision Transformer backbones
+transformers>=4.28.0  # Semantic segmentation models
+segmentation-models-pytorch>=0.3.2  # Segmentation architectures
+einops>=0.6.1  # Tensor operations
+
+# Loss Functions & Metrics
+# 损失函数和评估指标
+lpips>=0.1.4  # Perceptual loss
+pytorch-msssim>=0.2.1  # SSIM metric
+
+# Optional: Image Quality Assessment (安装失败不影响主要功能)
+# Optional: Image Quality Assessment (not required for core functionality)
+# piq>=0.7.0  # NIQE, BRISQUE metrics (uncomment if needed)

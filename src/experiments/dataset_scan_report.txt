@@ -1,0 +1,105 @@
+====================================================================================================
+
+Dataset Scan Summary Report
+====================================================================================================
+
+ Scan Time: 2025-11-10 14:14:14
+ Total Datasets: 10
+ With Reference: 4
+ Without Reference: 6
+ Total Images: 9431
+
+====================================================================================================
+ Details
+====================================================================================================
+
+1. DICM
+----------------------------------------------------------------------------------------------------
+    Path: ../../data/stage3_eval\DICM
+    Structure Type: flat
+    Low Dir: . (69 images)
+    Has Reference: NO
+
+2. Endo-LowLight
+----------------------------------------------------------------------------------------------------
+    Path: ../../data/stage3_eval\Endo-LowLight
+    Structure Type: flat
+    Low Dir: . (5 images)
+    Has Reference: NO
+
+3. ExDark
+----------------------------------------------------------------------------------------------------
+    Path: ../../data/stage3_eval\ExDark
+    Structure Type: flat
+    Low Dir: ExDark (7363 images)
+    Has Reference: NO
+
+4. LOL-v1
+----------------------------------------------------------------------------------------------------
+    Path: ../../data/stage3_eval\LOL-v1
+    Structure Type: paired
+    Low Dir: eval15\low (15 images)
+    High Dir: eval15\high (15 images)
+    Has Reference: YES
+
+5. LOL-v2
+----------------------------------------------------------------------------------------------------
+    Path: ../../data/stage3_eval\LOL-v2
+    Structure Type: paired
+    Low Dir: Real_captured\Test\Low (100 images)
+    High Dir: Real_captured\Test\Normal (100 images)
+    Has Reference: YES
+
+6. LOLBlur
+----------------------------------------------------------------------------------------------------
+    Path: ../../data/stage3_eval\LOLBlur
+    Structure Type: paired
+    Low Dir: test\low_blur (1800 images)
+    High Dir: test\high_sharp_original (1800 images)
+    Has Reference: YES
+
+7. LSRW
+----------------------------------------------------------------------------------------------------
+    Path: ../../data/stage3_eval\LSRW
+    Structure Type: paired
+    Low Dir: Eval\Huawei\low (30 images)
+    High Dir: Eval\Huawei\high (30 images)
+    Has Reference: YES
+
+8. MEF
+----------------------------------------------------------------------------------------------------
+    Path: ../../data/stage3_eval\MEF
+    Structure Type: flat
+    Low Dir: . (17 images)
+    Has Reference: NO
+
+9. NPE
+----------------------------------------------------------------------------------------------------
+    Path: ../../data/stage3_eval\NPE
+    Structure Type: flat
+    Low Dir: . (8 images)
+    Has Reference: NO
+
+10. VV
+----------------------------------------------------------------------------------------------------
+    Path: ../../data/stage3_eval\VV
+    Structure Type: flat
+    Low Dir: . (24 images)
+    Has Reference: NO
+
+====================================================================================================
+ Recommendations
+====================================================================================================
+
+   4 datasets have reference images (can use full metrics)
+   6 datasets have no references (use no-reference metrics only)
+   Total images to process: 9431
+
+ Estimated Processing Time (per ablation):
+   GPU (RTX 3090): ~18.9 minutes
+   CPU: ~75.4 minutes
+
+ Estimated Storage Requirements:
+   Per ablation: ~377.2 GB
+   All 16 ablations: ~6035.8 GB
+

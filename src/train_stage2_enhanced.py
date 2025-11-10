@@ -17,7 +17,7 @@ import yaml
 import argparse
 import time
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 import torch
 import torch.nn as nn
@@ -25,7 +25,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from torch.cuda.amp import GradScaler, autocast
-from torch.utils.tensorboard import SummaryWriter
+from torch.utils.tensorboard.writer import SummaryWriter
 
 import numpy as np
 from tqdm import tqdm
@@ -33,6 +33,21 @@ import csv
 import warnings
 warnings.filterwarnings("ignore")
 
+from metrics_utils import (
+    compute_psnr,
+    compute_ssim,
+    compute_iter_speed,
+    compute_delta_e,
+    maybe_compute_niqe,
+    maybe_compute_brisque,
+)
+
+try:
+    import lpips  # type: ignore
+    _LPIPS_AVAILABLE = True
+except ImportError:
+    lpips = None  # type: ignore
+    _LPIPS_AVAILABLE = False
 # Import modules with error handling
 try:
     from data_loader import get_dataloader
@@ -45,7 +60,7 @@ except ImportError as e:
     raise ImportError(f"Cannot import loss_functions: {e}")
 
 try:
-    # 优先加载增强版模型（Claude 的）
+    # 浼樺厛鍔犺浇澧炲己鐗堟ā鍨嬶紙Claude 鐨勶級
     from model.models_enhanced import (
         EnhancementGenerator as EnhancedGenerator,
         SemanticGuidanceModule,
@@ -55,9 +70,10 @@ try:
     Discriminator = EnhancedDiscriminator
     print(" Loaded enhanced generator & discriminator (models_enhanced.py)")
 except ImportError:
-    # 回退到普通模型
+    # Fallback to base models
     from model.models import EnhancementGenerator, Discriminator
-    print(" Using base generator & discriminator (models.py)")
+    SemanticGuidanceModule = None  # type: ignore[assignment]
+    print(" Using base generator & discriminator (models.py) - semantic module unavailable")
 
 
 try:
@@ -107,7 +123,11 @@ class EnhancedStage2Trainer:
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+        self.semantic_requires_grad = False
+        self.semantic_proj: Optional[nn.Module] = None
+        self.monitor_cfg = self.config.get('monitoring', {})
+        self.metrics_interval = int(self.monitor_cfg.get('metrics_interval', 50))
+        self.semantic_conf_threshold = float(self.config['model'].get('semantic_conf_threshold', 0.0))
         
         # Feature flags
         self.use_multiscale = config['model'].get('use_multiscale', False)
@@ -145,6 +165,8 @@ class EnhancedStage2Trainer:
         self.use_amp = torch.cuda.is_available()
         self.scaler_g = GradScaler(enabled=self.use_amp) if self.use_amp else None
         self.scaler_d = GradScaler(enabled=self.use_amp) if self.use_amp else None
+        if self.use_amp and (self.scaler_g is None or self.scaler_d is None):
+            raise RuntimeError("AMP is enabled but GradScaler could not be initialized.")
         
         # Training state
         self.current_epoch = 0
@@ -155,6 +177,16 @@ class EnhancedStage2Trainer:
         
         # Setup logging
         self.setup_logging()
+
+        # LPIPS for in-training monitoring
+        self.lpips_model = None
+        if _LPIPS_AVAILABLE:
+            try:
+                self.lpips_model = lpips.LPIPS(net='alex').to(self.device)
+                self.lpips_model.eval()
+                print("LPIPS model loaded for training metrics.")
+            except Exception as exc:
+                print(f"Warning: failed to load LPIPS model ({exc})")
         
         # Gradient accumulation
         self.accumulate_steps = config['training'].get('accumulate_steps', 1)
@@ -184,33 +216,54 @@ class EnhancedStage2Trainer:
             'semantic_channels': model_cfg.get('semantic_channels', 64),
             'use_semantic': model_cfg.get('use_semantic', True),
             'use_multiscale': self.use_multiscale,
-            'num_scales': model_cfg.get('num_scales', 3)
+            'num_scales': model_cfg.get('num_scales', 3),
+            'lightweight': model_cfg.get('lightweight', False),
+            'channel_multiplier': model_cfg.get('channel_multiplier', 1.0),
+            'use_depthwise': model_cfg.get('use_depthwise', model_cfg.get('lightweight', False)),
+            'use_noise_gate': model_cfg.get('use_noise_gate', True),
+            'noise_gate_kernel': model_cfg.get('noise_gate_kernel', 3),
         }
         
         self.generator = EnhancementGenerator(gen_config).to(self.device)
         
         # Semantic guidance module
         if self.use_semantic_guidance:
-            self.semantic_module = SemanticGuidanceModule(
-                num_classes=model_cfg.get('num_classes', 19),
-                pretrained=model_cfg.get('semantic_pretrained', True),
-                output_features=True
-            ).to(self.device)
-            # 投影层: SegFormer输出为32通道，生成器期望64通道
-            self.semantic_proj = torch.nn.Conv2d(32, 64, 1).to(self.device)  # in_channels=32, out_channels=64
+            if SemanticGuidanceModule is None:
+                print("Semantic module unavailable; disabling semantic guidance.")
+                self.use_semantic_guidance = False
+                self.semantic_module = None
+            else:
+                semantic_feature_dim = model_cfg.get('semantic_feature_dim', model_cfg.get('semantic_channels', 64))
+                downsample_ratio = model_cfg.get('semantic_downsample', 1)
+                self.semantic_module = SemanticGuidanceModule(
+                    num_classes=model_cfg.get('num_classes', 19),
+                    pretrained=model_cfg.get('semantic_pretrained', True),
+                    output_features=True,
+                    downsample_ratio=downsample_ratio,
+                    feature_dim=semantic_feature_dim
+                ).to(self.device)
 
-            # Freeze semantic module initially
-            if not model_cfg.get('finetune_semantic', False):
-                for param in self.semantic_module.parameters():
-                    param.requires_grad = False
-                # 在评估模式下运行特征提取
-                self.semantic_module.eval()
-                
-            # DEBUG: 打印模型结构以验证通道数
-            print(f"Semantic projection layer: in_channels={self.semantic_proj.in_channels}, out_channels={self.semantic_proj.out_channels}")
+                proj_in = getattr(self.semantic_module, 'output_channels', semantic_feature_dim)
+                proj_out = model_cfg.get('semantic_channels', 64)
+                if proj_in != proj_out:
+                    self.semantic_proj = nn.Conv2d(proj_in, proj_out, 1).to(self.device)
+                else:
+                    self.semantic_proj = nn.Identity().to(self.device)
+
+                self.semantic_requires_grad = bool(model_cfg.get('finetune_semantic', False))
+                if not self.semantic_requires_grad:
+                    for param in self.semantic_module.parameters():
+                        param.requires_grad = False
+                    self.semantic_module.eval()
+                else:
+                    self.semantic_module.train()
+                print(
+                    f"Semantic guidance: feature dim {proj_in}->{proj_out}, "
+                    f"downsample ratio x{downsample_ratio}"
+                )
         else:
             self.semantic_module = None
-        
+            self.semantic_proj = None
         # Discriminator
         self.discriminator = Discriminator(
             in_channels=3,
@@ -227,6 +280,8 @@ class EnhancedStage2Trainer:
         
         if self.semantic_module:
             sem_params = sum(p.numel() for p in self.semantic_module.parameters())
+            if self.semantic_proj is not None:
+                sem_params += sum(p.numel() for p in self.semantic_proj.parameters())
             print(f"Semantic Module: {sem_params:,} parameters")
     
     def setup_optimizers(self):
@@ -250,9 +305,12 @@ class EnhancedStage2Trainer:
         )
         
         # Semantic module optimizer (if fine-tuning)
-        if self.semantic_module and train_cfg.get('finetune_semantic', False):
+        if self.semantic_module and self.semantic_requires_grad:
+            semantic_params = list(self.semantic_module.parameters())
+            if self.semantic_proj is not None:
+                semantic_params += [p for p in self.semantic_proj.parameters() if p.requires_grad]
             self.optimizer_sem = optim.AdamW(
-                self.semantic_module.parameters(),
+                semantic_params,
                 lr=train_cfg.get('lr_semantic', 0.00002),
                 betas=(0.9, 0.999),
                 weight_decay=0.01
@@ -317,7 +375,16 @@ class EnhancedStage2Trainer:
             writer.writerow([
                 'epoch', 'batch', 'phase', 'gen_loss', 'disc_loss',
                 'color_loss', 'semantic_loss', 'perceptual_loss', 
-                'adv_loss', 'freq_loss', 'lr', 'w_semantic'
+                'adv_loss', 'freq_loss', 'noise_loss', 'lr', 'w_semantic'
+            ])
+        
+        self.metrics_path = os.path.join(self.log_dir, 'metrics.csv')
+        with open(self.metrics_path, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                'epoch', 'step', 'phase', 'psnr', 'ssim', 'delta_e', 'niqe', 'brisque', 'lpips',
+                'w_color', 'w_semantic', 'w_perceptual', 'w_freq', 'w_adv',
+                'lr', 'iter_time_ms', 'speed_imgs_sec'
             ])
         
         print(f"Logging initialized at {self.output_dir}")
@@ -351,13 +418,17 @@ class EnhancedStage2Trainer:
         
         return self.config['loss']
     
-    def extract_semantic_features(self, image: torch.Tensor):
-        """Extract semantic features from image"""
-        # If semantic module disabled
+    def extract_semantic_features(
+        self,
+        image: torch.Tensor,
+        paths: Optional[List[str]] = None
+    ):
+        """Extract semantic features from image (paths reserved for future caching)."""
         if self.semantic_module is None:
             return None, None
 
-        with torch.no_grad():
+        context = torch.enable_grad() if self.semantic_requires_grad else torch.no_grad()
+        with context:
             output = self.semantic_module(image)
 
         if output is None:
@@ -385,9 +456,17 @@ class EnhancedStage2Trainer:
             print("Warning: Semantic module returned no features")
             return None, confidence
 
+        if self.semantic_proj is not None:
+            features = self.semantic_proj(features)
+
+        if confidence is not None and self.semantic_conf_threshold > 0:
+            mask = (confidence >= self.semantic_conf_threshold).float()
+            confidence = confidence * mask
+            features = features * mask
+
         expected_channels = self.config['model'].get('semantic_channels', 64)
         if features.shape[1] != expected_channels:
-            print(f"Warning: Expected {expected_channels} channels from semantic module, got {features.shape[1]}")
+            print(f"Warning: Expected {expected_channels} semantic channels, got {features.shape[1]}")
 
         return features, confidence
 
@@ -413,7 +492,7 @@ class EnhancedStage2Trainer:
         epoch_losses = {
             'gen_total': 0.0, 'disc_total': 0.0,
             'color': 0.0, 'semantic': 0.0, 'perceptual': 0.0,
-            'adv': 0.0, 'freq': 0.0
+            'adv': 0.0, 'freq': 0.0, 'noise': 0.0
         }
         
         num_batches = 0
@@ -423,6 +502,7 @@ class EnhancedStage2Trainer:
         pbar = tqdm(dataloader, desc=f"Epoch {epoch}/{self.config['training']['epochs']} [Phase {self.current_phase}]")
         
         for batch_idx, batch in enumerate(pbar):
+            iter_start = time.time()
             low_img = batch['low'].to(self.device)
             high_img = batch['high'].to(self.device)
             
@@ -453,7 +533,12 @@ class EnhancedStage2Trainer:
                     continue
                 
                 # Compute losses
-                losses_g = self.criterion(enhanced, high_img, low_img)
+                losses_g = self.criterion(
+                    enhanced,
+                    high_img,
+                    low_img,
+                    epoch=epoch
+                )
                 
                 if torch.isnan(losses_g['total']):
                     print(f"Warning: NaN in loss at batch {batch_idx}, skipping...")
@@ -471,6 +556,8 @@ class EnhancedStage2Trainer:
             
             # Backward
             if self.use_amp:
+                if self.scaler_g is None:
+                    raise RuntimeError("GradScaler expected but not initialized for generator.")
                 self.scaler_g.scale(losses_g['total']).backward()
             else:
                 losses_g['total'].backward()
@@ -478,6 +565,8 @@ class EnhancedStage2Trainer:
             # Update generator
             if should_train_g:
                 if self.use_amp:
+                    if self.scaler_g is None:
+                        raise RuntimeError("GradScaler expected but not initialized for generator.")
                     self.scaler_g.unscale_(self.optimizer_g)
                     self.clip_gradients_safely(self.generator, self.gradient_clip)
                     self.scaler_g.step(self.optimizer_g)
@@ -510,6 +599,8 @@ class EnhancedStage2Trainer:
                     disc_loss = (real_loss + fake_loss) * 0.5
                 
                 if self.use_amp:
+                    if self.scaler_d is None:
+                        raise RuntimeError("GradScaler expected but not initialized for discriminator.")
                     self.scaler_d.scale(disc_loss).backward()
                     self.scaler_d.unscale_(self.optimizer_d)
                     self.clip_gradients_safely(self.discriminator, self.gradient_clip_d)
@@ -523,11 +614,12 @@ class EnhancedStage2Trainer:
             # Accumulate losses
             epoch_losses['gen_total'] += losses_g['total'].item()
             epoch_losses['disc_total'] += disc_loss.item()
-            for key in ['color', 'semantic', 'perceptual', 'adv', 'freq']:
+            for key in ['color', 'semantic', 'perceptual', 'adv', 'freq', 'noise']:
                 if key in losses_g:
                     epoch_losses[key] += losses_g[key].item()
             
             num_batches += 1
+            iter_duration = time.time() - iter_start
             
             # Update progress bar
             pbar.set_postfix({
@@ -539,7 +631,7 @@ class EnhancedStage2Trainer:
             
             # Logging
             if self.global_step % 50 == 0:
-                for key in ['total', 'color', 'semantic', 'perceptual', 'adv', 'freq']:
+                for key in ['total', 'color', 'semantic', 'perceptual', 'adv', 'freq', 'noise']:
                     if key in losses_g:
                         self.writer.add_scalar(f'Loss/{key}', losses_g[key].item(), self.global_step)
             
@@ -554,7 +646,59 @@ class EnhancedStage2Trainer:
                         losses_g.get('perceptual', torch.tensor(0)).item(),
                         losses_g.get('adv', torch.tensor(0)).item(),
                         losses_g.get('freq', torch.tensor(0)).item(),
+                        losses_g.get('noise', torch.tensor(0)).item(),
                         current_lr, current_w_semantic
+                    ])
+
+            if self.global_step % self.metrics_interval == 0:
+                with torch.no_grad():
+                    enhanced_detached = enhanced.detach()
+                    step_psnr = compute_psnr(enhanced_detached, high_img).item()
+                    step_ssim = compute_ssim(enhanced_detached, high_img).item()
+                    step_delta_e = compute_delta_e(enhanced_detached, high_img).item()
+                    step_niqe = maybe_compute_niqe(enhanced_detached)
+                    step_brisque = maybe_compute_brisque(enhanced_detached)
+                    step_lpips = None
+                    if self.lpips_model is not None:
+                        try:
+                            enh_norm = enhanced_detached * 2.0 - 1.0
+                            target_norm = high_img * 2.0 - 1.0
+                            lpips_val = self.lpips_model(enh_norm, target_norm)
+                            step_lpips = float(lpips_val.mean().item())
+                        except Exception as exc:
+                            self.writer.add_text('Warnings/LPIPS', f'LPIPS failed: {exc}', self.global_step)
+                            step_lpips = None
+                iter_ms, imgs_per_s = compute_iter_speed(iter_duration + 1e-8, low_img.size(0))
+                logged_weights = current_weights
+                if hasattr(self.criterion, 'get_last_weights'):
+                    try:
+                        logged_weights = self.criterion.get_last_weights()
+                    except Exception:
+                        logged_weights = current_weights
+                w_color = logged_weights.get('w_color', 0.0)
+                w_sem = logged_weights.get('w_semantic', 0.0)
+                w_perc = logged_weights.get('w_perceptual', 0.0)
+                w_freq = logged_weights.get('w_freq', 0.0)
+                w_adv = logged_weights.get('w_adv', 0.0)
+                self.writer.add_scalar('Train/PSNR', step_psnr, self.global_step)
+                self.writer.add_scalar('Train/SSIM', step_ssim, self.global_step)
+                self.writer.add_scalar('Train/DeltaE', step_delta_e, self.global_step)
+                if step_niqe is not None:
+                    self.writer.add_scalar('Train/NIQE', float(step_niqe), self.global_step)
+                if step_brisque is not None:
+                    self.writer.add_scalar('Train/BRISQUE', float(step_brisque), self.global_step)
+                if step_lpips is not None:
+                    self.writer.add_scalar('Train/LPIPS', float(step_lpips), self.global_step)
+                with open(self.metrics_path, 'a', newline='') as f:
+                    writer = csv.writer(f)
+                    writer.writerow([
+                        epoch, self.global_step, self.current_phase,
+                        step_psnr, step_ssim, step_delta_e,
+                        float(step_niqe) if step_niqe is not None else '',
+                        float(step_brisque) if step_brisque is not None else '',
+                        float(step_lpips) if step_lpips is not None else '',
+                        w_color, w_sem, w_perc, w_freq, w_adv,
+                        current_lr, iter_ms, imgs_per_s
                     ])
             
             if self.global_step % 1000 == 0:
@@ -576,7 +720,7 @@ class EnhancedStage2Trainer:
         if self.ema:
             self.ema.apply_shadow()
         
-        val_losses = {'total': 0.0, 'psnr': 0.0, 'ssim': 0.0}
+        val_losses = {'total': 0.0, 'psnr': 0.0, 'ssim': 0.0, 'delta_e': 0.0}
         num_batches = 0
         
         with torch.no_grad():
@@ -604,6 +748,7 @@ class EnhancedStage2Trainer:
                 
                 psnr = 20 * torch.log10(1.0 / (torch.sqrt(mse) + 1e-8))
                 val_losses['psnr'] += psnr.item()
+                val_losses['delta_e'] += compute_delta_e(enhanced, high_img).item()
                 
                 if hasattr(self.criterion, 'ssim_loss'):
                     ssim_val = self.criterion.ssim_loss(enhanced, high_img)
@@ -622,25 +767,60 @@ class EnhancedStage2Trainer:
         self.writer.add_scalar('Val/Loss', val_losses['total'], epoch)
         self.writer.add_scalar('Val/PSNR', val_losses['psnr'], epoch)
         self.writer.add_scalar('Val/SSIM', val_losses['ssim'], epoch)
+        self.writer.add_scalar('Val/DeltaE', val_losses['delta_e'], epoch)
         
         self.generator.train()
         
         return val_losses
     
     def save_sample_images(self, low, enhanced, target, epoch):
-        """Save sample images"""
+        """
+        Save comparison images (low/enhanced/high) while avoiding duplicate files.
+        """
         import torchvision.utils as vutils
-        
+
+        with torch.no_grad():
+            enhanced_processed = torch.clamp(enhanced.clone(), 0, 1)
+            kernel = self._get_gaussian_kernel(3, 0.5).to(enhanced.device)
+            for i in range(enhanced_processed.size(1)):
+                enhanced_processed[:, i:i+1] = F.conv2d(
+                    enhanced_processed[:, i:i+1],
+                    kernel,
+                    padding=1
+                )
+
         low_img = low[0:1]
-        enhanced_img = enhanced[0:1]
+        enhanced_img = enhanced_processed[0:1]
         target_img = target[0:1]
-        
         comparison = torch.cat([low_img, enhanced_img, target_img], dim=3)
-        
+
         save_path = os.path.join(self.image_dir, f'epoch_{epoch:03d}_step_{self.global_step}.png')
-        vutils.save_image(comparison, save_path, normalize=False)
-        
+        vutils.save_image(comparison, save_path, normalize=False, format='PNG')
+
         self.writer.add_image('Images/Comparison', comparison[0], self.global_step)
+        self.writer.add_image('Images/Enhanced', enhanced_img[0], self.global_step)
+
+    def _get_gaussian_kernel(self, kernel_size: int, sigma: float):
+        """
+        生成高斯核用于平滑
+        Generate Gaussian kernel for smoothing
+        """
+        # 创建一维高斯核
+        # Create 1D Gaussian kernel
+        coords = torch.arange(kernel_size, dtype=torch.float32)
+        coords -= kernel_size // 2
+
+        g = torch.exp(-(coords ** 2) / (2 * sigma ** 2))
+        g /= g.sum()
+
+        # 创建二维高斯核
+        # Create 2D Gaussian kernel
+        kernel_2d = g[:, None] * g[None, :]
+        kernel_2d = kernel_2d / kernel_2d.sum()
+
+        # 重塑为卷积核格式 (out_channels, in_channels, H, W)
+        # Reshape to convolution kernel format
+        return kernel_2d.view(1, 1, kernel_size, kernel_size)
     
     def save_checkpoint(self, epoch: int, val_loss: float, is_best: bool = False):
         """Save checkpoint"""

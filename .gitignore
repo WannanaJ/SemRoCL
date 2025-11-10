@@ -1,36 +1,91 @@
+# ==========================================
+# SemRoCL .gitignore
+# ==========================================
+
 # Python cache
+# Python缓存文件
 __pycache__/
 *.py[cod]
 *.pyo
+*.pyc
 *.so
+*.egg
+*.egg-info/
+dist/
+build/
+.pytest_cache/
 
 # Virtual environment
+# 虚拟环境
 .venv/
 env/
 venv/
 *.conda
 *.env
 
-# Logs & debug
+# IDE & Editors
+# 编辑器配置
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+
+# Logs & Debug
+# 日志和调试
 logs/
 *.log
 wandb/
 tensorboard/
 tb_logs/
+*.csv
+training.log
 
-# Checkpoints & models
+# Checkpoints & Models
+# 模型权重和检查点
 *.pth
 *.pt
 *.ckpt
+*.safetensors
+*.onnx
+*.trt
 checkpoints/
 outputs/
 runs/
+experiments/*/checkpoints/
+experiments/*/logs/
+experiments/*/images/
 
 # Datasets
+# 数据集（太大不上传）
 data/
 dataset/
 datasets/
+*.zip
+*.tar
+*.tar.gz
 
-# System files
+# Temporary Files
+# 临时文件
+tmp/
+temp/
+*.tmp
+tmp_*.py
+diff_*.txt
+*_backup.py
+*_old.py
+*_test.py
+
+# System Files
+# 系统文件
 .DS_Store
 Thumbs.db
+desktop.ini
+
+# Project-specific
+# 项目特定
+*.bak
+*.backup
+MANIFEST.txt

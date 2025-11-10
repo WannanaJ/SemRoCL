@@ -26,7 +26,7 @@ pip install pyyaml rich colorama
 
 :: 检查安装状态
 echo ============================================================
-echo ✅ Dependency installation completed!
+echo  Dependency installation completed!
 echo You can now run:
 echo     python tools/visualize_moco_features.py --help
 echo ============================================================

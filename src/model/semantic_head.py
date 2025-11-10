@@ -3,6 +3,8 @@ Lightweight Semantic Segmentation Head with Uncertainty Estimation
 Uses SegFormer-B0 or MobileViT-UNet for efficient semantic guidance
 """
 
+from typing import Any, cast
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -35,6 +37,8 @@ class SemanticHead(nn.Module):
         self.uncertainty_estimation = uncertainty_estimation
         
         # Build backbone
+        self.backbone: Any
+
         if 'segformer' in backbone:
             self.backbone = self._build_segformer(backbone, num_classes, pretrained)
         elif 'mobilevit' in backbone:
@@ -108,7 +112,12 @@ class SemanticHead(nn.Module):
         
         # Get segmentation logits
         if 'segformer' in self.backbone_name:
-            outputs = self.backbone(x)
+            segformer_model = cast(SegformerForSemanticSegmentation, self.backbone)
+            outputs = segformer_model(
+                pixel_values=x,
+                output_hidden_states=True,
+                return_dict=True,
+            )
             seg_logits = outputs.logits
             
             # Upsample to original size
@@ -120,8 +129,11 @@ class SemanticHead(nn.Module):
             )
         else:
             # MobileViT encoder-decoder
-            features = self.backbone['encoder'](x)
-            seg_logits = self.backbone['decoder'](features)
+            mobilevit_modules = cast(nn.ModuleDict, self.backbone)
+            encoder = cast(nn.Module, mobilevit_modules['encoder'])
+            decoder = cast(nn.Module, mobilevit_modules['decoder'])
+            features = encoder(x)
+            seg_logits = decoder(features)
             seg_logits = F.interpolate(seg_logits, size=(H, W), mode='bilinear', align_corners=False)
         
         # Compute uncertainty/confidence map
@@ -148,7 +160,9 @@ class SemanticHead(nn.Module):
         if 'segformer' in self.backbone_name:
             # Extract intermediate features from SegFormer
             # IMPORTANT: Use the segformer encoder, not the full model
-            outputs = self.backbone.segformer(
+            segformer_model = cast(SegformerForSemanticSegmentation, self.backbone)
+            backbone_core = cast(Any, segformer_model.segformer)
+            outputs = backbone_core(
                 pixel_values=x,
                 output_hidden_states=True,
                 return_dict=True
@@ -166,7 +180,9 @@ class SemanticHead(nn.Module):
             return features
         else:
             # Extract features from MobileViT encoder
-            features = self.backbone['encoder'](x)
+            mobilevit_modules = cast(nn.ModuleDict, self.backbone)
+            encoder = cast(nn.Module, mobilevit_modules['encoder'])
+            features = encoder(x)
             return features
 
 

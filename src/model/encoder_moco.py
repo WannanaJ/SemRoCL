@@ -8,6 +8,85 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import models
 import copy
+from typing import Dict, List, Tuple, Optional
+
+
+class ResNetEncoder(nn.Module):
+    """
+    ResNet backbone wrapper that returns projection features and optional intermediate embeddings.
+    """
+
+    def __init__(
+        self,
+        arch: str,
+        feat_dim: int,
+        mid_layers: Optional[List[str]] = None,
+    ):
+        super().__init__()
+        if arch == "resnet18":
+            base_model = models.resnet18(pretrained=True)
+            base_feat_dim = 512
+        elif arch == "resnet50":
+            base_model = models.resnet50(pretrained=True)
+            base_feat_dim = 2048
+        else:
+            raise ValueError(f"Unsupported architecture: {arch}")
+
+        self.conv1 = base_model.conv1
+        self.bn1 = base_model.bn1
+        self.relu = base_model.relu
+        self.maxpool = base_model.maxpool
+        self.layer1 = base_model.layer1
+        self.layer2 = base_model.layer2
+        self.layer3 = base_model.layer3
+        self.layer4 = base_model.layer4
+        self.avgpool = base_model.avgpool
+
+        self.projection_head = nn.Sequential(
+            nn.Linear(base_feat_dim, base_feat_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(base_feat_dim, feat_dim),
+        )
+
+        self.mid_layers = mid_layers or []
+        self.mid_heads = nn.ModuleDict()
+        for name in self.mid_layers:
+            if name not in {"layer1", "layer2", "layer3", "layer4"}:
+                raise ValueError(f"Unsupported mid-layer: {name}")
+            out_channels = getattr(self, name)[-1].conv3.out_channels if arch == "resnet50" else getattr(self, name)[-1].conv2.out_channels
+            self.mid_heads[name] = nn.Sequential(
+                nn.AdaptiveAvgPool2d(1),
+                nn.Flatten(),
+                nn.Linear(out_channels, feat_dim),
+            )
+
+    def forward(self, x: torch.Tensor, return_intermediate: bool = False):
+        feats: Dict[str, torch.Tensor] = {}
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu(x)
+        x = self.maxpool(x)
+
+        x = self.layer1(x)
+        if return_intermediate and "layer1" in self.mid_layers:
+            feats["layer1"] = F.normalize(self.mid_heads["layer1"](x), dim=1)
+
+        x = self.layer2(x)
+        if return_intermediate and "layer2" in self.mid_layers:
+            feats["layer2"] = F.normalize(self.mid_heads["layer2"](x), dim=1)
+
+        x = self.layer3(x)
+        if return_intermediate and "layer3" in self.mid_layers:
+            feats["layer3"] = F.normalize(self.mid_heads["layer3"](x), dim=1)
+
+        x = self.layer4(x)
+        if return_intermediate and "layer4" in self.mid_layers:
+            feats["layer4"] = F.normalize(self.mid_heads["layer4"](x), dim=1)
+
+        pooled = torch.flatten(self.avgpool(x), 1)
+        proj = self.projection_head(pooled)
+        proj = F.normalize(proj, dim=1)
+        return proj, feats
 
 
 class MoCoV3Encoder(nn.Module):
@@ -22,7 +101,8 @@ class MoCoV3Encoder(nn.Module):
     """
     
     def __init__(self, base_encoder='resnet18', feat_dim=128, 
-                 queue_size=65536, momentum=0.999, temperature=0.07):
+                 queue_size=65536, momentum=0.999, temperature=0.07,
+                 mid_layers: Optional[List[str]] = None):
         """
         Args:
             base_encoder: Backbone architecture ('resnet18' or 'resnet50')
@@ -37,47 +117,30 @@ class MoCoV3Encoder(nn.Module):
         self.queue_size = queue_size
         self.momentum = momentum
         self.temperature = temperature
+        self.base_temperature = temperature
+        self.mid_layers = mid_layers or []
         
         # Build query encoder (online network)
-        self.encoder_q = self._build_encoder(base_encoder, feat_dim)
+        self.encoder_q = ResNetEncoder(base_encoder, feat_dim, self.mid_layers)
         
         # Build key encoder (momentum network)
-        self.encoder_k = self._build_encoder(base_encoder, feat_dim)
-        
-        # Initialize key encoder with query encoder weights
-        for param_q, param_k in zip(self.encoder_q.parameters(), 
-                                     self.encoder_k.parameters()):
-            param_k.data.copy_(param_q.data)
-            param_k.requires_grad = False  # Key encoder is not trained by gradient
+        self.encoder_k = copy.deepcopy(self.encoder_q)
+        for param in self.encoder_k.parameters():
+            param.requires_grad = False
         
         # Create the queue for negative samples
+        self.queue: torch.Tensor
+        self.queue_ptr: torch.Tensor
         self.register_buffer("queue", torch.randn(feat_dim, queue_size))
         self.queue = F.normalize(self.queue, dim=0)
         self.register_buffer("queue_ptr", torch.zeros(1, dtype=torch.long))
-    
-    def _build_encoder(self, arch, feat_dim):
-        """Build encoder backbone with projection head"""
-        # Load pretrained ResNet
-        if arch == 'resnet18':
-            base_model = models.resnet18(pretrained=True)
-            base_feat_dim = 512
-        elif arch == 'resnet50':
-            base_model = models.resnet50(pretrained=True)
-            base_feat_dim = 2048
-        else:
-            raise ValueError(f"Unsupported architecture: {arch}")
-        
-        # Remove final FC layer
-        encoder = nn.Sequential(*list(base_model.children())[:-1])
-        
-        # Add projection head (2-layer MLP)
-        projection_head = nn.Sequential(
-            nn.Linear(base_feat_dim, base_feat_dim),
-            nn.ReLU(inplace=True),
-            nn.Linear(base_feat_dim, feat_dim)
-        )
-        
-        return nn.Sequential(encoder, nn.Flatten(), projection_head)
+
+        self.last_pos_sim = None
+        self.last_neg_logits = None
+        self.last_q = None
+        self.last_k = None
+        self.last_mid_q = {}
+        self.last_mid_k = {}
     
     @torch.no_grad()
     def _momentum_update_key_encoder(self):
@@ -91,7 +154,7 @@ class MoCoV3Encoder(nn.Module):
         """Update queue with new keys"""
         batch_size = keys.shape[0]
         
-        ptr = int(self.queue_ptr)
+        ptr = int(self.queue_ptr.item())
         
         # Replace oldest keys in queue
         if ptr + batch_size <= self.queue_size:
@@ -103,7 +166,7 @@ class MoCoV3Encoder(nn.Module):
             self.queue[:, :batch_size - remaining] = keys[remaining:].T
         
         ptr = (ptr + batch_size) % self.queue_size
-        self.queue_ptr[0] = ptr
+        self.queue_ptr[0] = torch.tensor(ptr, device=self.queue_ptr.device, dtype=self.queue_ptr.dtype)
     
     def forward(self, im_q, im_k=None):
         """
@@ -118,11 +181,16 @@ class MoCoV3Encoder(nn.Module):
             If inference: query features
         """
         # Compute query features
-        q = self.encoder_q(im_q)  # (B, feat_dim)
-        q = F.normalize(q, dim=1)
+        q, q_feats = self.encoder_q(im_q, return_intermediate=bool(self.mid_layers))
+        self.last_q = q.detach()
+        self.last_mid_q = {name: feat.detach() for name, feat in q_feats.items()}
         
         if im_k is None:
             # Inference mode: return features only
+            self.last_k = None
+            self.last_pos_sim = None
+            self.last_neg_logits = None
+            self.last_mid_k = None
             return q
         
         # Training mode: compute key features
@@ -131,14 +199,19 @@ class MoCoV3Encoder(nn.Module):
             self._momentum_update_key_encoder()
             
             # Compute key features
-            k = self.encoder_k(im_k)  # (B, feat_dim)
-            k = F.normalize(k, dim=1)
+            k, k_feats = self.encoder_k(im_k, return_intermediate=bool(self.mid_layers))
+            self.last_k = k.detach()
+            self.last_mid_k = {name: feat.detach() for name, feat in k_feats.items()}
         
         # Compute logits
         # Positive pairs: (B, 1)
-        l_pos = torch.einsum('nc,nc->n', [q, k]).unsqueeze(-1)
+        pos_sim = torch.einsum('nc,nc->n', [q, k])
+        l_pos = pos_sim.unsqueeze(-1)
         # Negative pairs: (B, queue_size)
         l_neg = torch.einsum('nc,ck->nk', [q, self.queue.clone().detach()])
+
+        self.last_pos_sim = pos_sim.detach()
+        self.last_neg_logits = l_neg.detach()
         
         # Concatenate logits: (B, 1 + queue_size)
         logits = torch.cat([l_pos, l_neg], dim=1)
@@ -147,19 +220,23 @@ class MoCoV3Encoder(nn.Module):
         logits /= self.temperature
         
         # Labels: positive is the first element
-        labels = torch.zeros(logits.shape[0], dtype=torch.long).cuda()
+        labels = torch.zeros(logits.shape[0], dtype=torch.long, device=logits.device)
         
         # Update queue
         self._dequeue_and_enqueue(k)
         
-        return logits, labels
+        return logits, labels, {"mid_q": q_feats, "mid_k": k_feats}
     
     def get_features(self, x, normalize=True):
         """Extract features for downstream tasks"""
-        features = self.encoder_q(x)
+        features, _ = self.encoder_q(x, return_intermediate=False)
         if normalize:
             features = F.normalize(features, dim=1)
         return features
+    
+    def set_temperature(self, tau: float):
+        """Dynamically update temperature for contrastive logits."""
+        self.temperature = float(tau)
 
 
 class BYOLEncoder(nn.Module):

@@ -1,0 +1,279 @@
+# ============================================
+# SemRoCL 消融实验配置文件
+# SemRoCL Ablation Experiment Configuration
+# ============================================
+#
+# 用于TIP期刊投稿的完整消融实验配置
+# Complete ablation experiment configuration for TIP journal submission
+#
+# 作者 Author: SemRoCL Team
+# 日期 Date: 2025-11-10
+# 版本 Version: 1.0.0
+
+# ============================================
+# 实验基本信息 / Experiment Basic Information
+# ============================================
+experiment:
+  name: semrocl_ablation_study
+  description: "Ablation study for SemRoCL framework"
+  mode: ablation  # 模式：ablation / full_training / evaluation
+
+  # 数据集选择 / Dataset selection
+  # 可选值 Options: 'LOL-v1', 'LOL-v2-real', 'LOL-v2-synthetic', 'LIME'
+  dataset: LOL-v1
+
+  # 模型权重路径 / Model weights path
+  # 请确保路径存在 / Please ensure path exists
+  weights: outputs/semantic_enhancement_stage2_ENHANCED/checkpoints/best_model.pth
+
+  # 实验日期标记（自动生成）/ Experiment date tag (auto-generated)
+  timestamp: true
+
+# ============================================
+# 数据配置 / Data Configuration
+# ============================================
+data:
+  # 数据根目录 / Data root directory
+  data_dir: ./data
+
+  # 批量大小（消融实验中通常为1）/ Batch size (usually 1 for ablation)
+  batch_size: 1
+
+  # 数据加载器工作线程数 / Number of data loader workers
+  num_workers: 0
+
+  # 是否打乱数据 / Whether to shuffle data
+  shuffle: false
+
+# ============================================
+# 消融配置 / Ablation Configuration
+# ============================================
+# 对于每个组件，列出要测试的值
+# For each component, list values to test
+# true = 启用该组件 / enable the component
+# false = 禁用该组件 / disable the component
+
+ablation:
+  # 语义引导模块 / Semantic guidance module
+  # 使用SegFormer进行语义特征提取
+  # Uses SegFormer for semantic feature extraction
+  use_semantic: [true, false]
+
+  # 频域约束 / Frequency domain constraint
+  # 使用DCT进行频域一致性约束
+  # Uses DCT for frequency consistency constraint
+  use_freq: [true, false]
+
+  # 对抗损失 / Adversarial loss
+  # 使用PatchGAN判别器
+  # Uses PatchGAN discriminator
+  use_gan: [true, false]
+
+  # 课程学习 / Curriculum learning
+  # 自适应课程学习调度器
+  # Adaptive curriculum learning scheduler
+  use_curriculum: [true, false]
+
+# 注意：以上配置将生成 2^4 = 16 个消融组合
+# Note: Above config will generate 2^4 = 16 ablation combinations
+#
+# 组合示例 Combinations example:
+# 1. sem1_freq1_gan1_cur1  - 所有组件启用 / All components enabled (完整模型 Full model)
+# 2. sem1_freq1_gan1_cur0  - 无课程学习 / No curriculum
+# 3. sem1_freq1_gan0_cur1  - 无对抗损失 / No GAN
+# 4. sem1_freq1_gan0_cur0  - 无GAN和课程学习 / No GAN and curriculum
+# 5. sem1_freq0_gan1_cur1  - 无频域约束 / No frequency
+# ...
+# 16. sem0_freq0_gan0_cur0 - 基线模型（所有消融） / Baseline (all ablated)
+
+# ============================================
+# 评估指标配置 / Evaluation Metrics Configuration
+# ============================================
+metrics:
+  # 要计算的指标列表 / List of metrics to compute
+  - psnr      # Peak Signal-to-Noise Ratio (峰值信噪比)
+  - ssim      # Structural Similarity Index (结构相似性)
+  - lpips     # Learned Perceptual Image Patch Similarity (感知相似性)
+  - niqe      # Natural Image Quality Evaluator (自然图像质量)
+  - brisque   # Blind/Referenceless Image Spatial Quality (无参考质量)
+  - delta_e   # Color Difference (色彩差异)
+  - hpi       # Human Perception Index (人类感知指数，综合指标)
+
+# ============================================
+# 输出配置 / Output Configuration
+# ============================================
+output:
+  # 输出基础目录 / Output base directory
+  base_dir: ./outputs/ablation_study
+
+  # 是否保存增强图像 / Whether to save enhanced images
+  save_images: true
+
+  # 是否保存详细指标（每张图像）/ Whether to save detailed metrics (per image)
+  save_detailed: true
+
+  # 是否保存CSV结果 / Whether to save CSV results
+  save_csv: true
+
+  # 是否生成LaTeX表格 / Whether to generate LaTeX tables
+  save_tex: true
+
+  # 是否生成可视化图表 / Whether to generate visualization plots
+  save_plots: true
+
+# ============================================
+# 设备配置 / Device Configuration
+# ============================================
+device:
+  # 使用的设备 / Device to use
+  # 可选值 Options: 'cuda', 'cpu', 'auto' (自动检测 / auto-detect)
+  type: auto
+
+  # GPU ID（如果有多个GPU）/ GPU ID (if multiple GPUs)
+  gpu_id: 0
+
+# ============================================
+# 日志配置 / Logging Configuration
+# ============================================
+logging:
+  # 日志级别 / Logging level
+  # 可选值 Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  level: INFO
+
+  # 是否在控制台显示 / Whether to display in console
+  console: true
+
+  # 是否保存到文件 / Whether to save to file
+  file: true
+
+# ============================================
+# 高级配置 / Advanced Configuration
+# ============================================
+advanced:
+  # 是否使用混合精度 / Whether to use mixed precision
+  use_amp: false
+
+  # 随机种子（可重复性）/ Random seed (reproducibility)
+  seed: 42
+
+  # 是否启用确定性模式 / Whether to enable deterministic mode
+  deterministic: false
+
+  # 内存优化 / Memory optimization
+  memory_efficient: true
+
+# ============================================
+# 可视化配置 / Visualization Configuration
+# ============================================
+visualization:
+  # 图表DPI / Figure DPI
+  dpi: 300
+
+  # 图表格式 / Figure format
+  # 可选值 Options: 'png', 'pdf', 'svg'
+  format: png
+
+  # 雷达图显示前N个配置 / Radar chart shows top N configs
+  radar_top_n: 5
+
+  # 颜色方案 / Color scheme
+  # 可选值 Options: 'husl', 'Set2', 'tab10', 'viridis'
+  color_palette: husl
+
+# ============================================
+# LaTeX表格配置 / LaTeX Table Configuration
+# ============================================
+latex:
+  # 表格样式 / Table style
+  style: booktabs  # 可选值 Options: 'booktabs', 'standard'
+
+  # 小数位数 / Decimal places
+  decimal_places:
+    psnr: 2
+    ssim: 4
+    lpips: 4
+    niqe: 4
+    brisque: 2
+    delta_e: 2
+    hpi: 4
+
+  # 是否显示标准差 / Whether to show standard deviation
+  show_std: true
+
+  # 是否加粗最佳值 / Whether to bold best values
+  bold_best: true
+
+# ============================================
+# 实验完整流程 / Complete Experiment Pipeline
+# ============================================
+# 运行完整实验的步骤 / Steps to run complete experiment:
+#
+# 1. 消融实验 / Ablation experiments:
+#    python src/experiments/run_ablation.py --config configs/experiment.yaml
+#
+# 2. 计算指标 / Compute metrics:
+#    python src/experiments/eval_metrics.py --config configs/experiment.yaml
+#
+# 3. 生成可视化 / Generate visualizations:
+#    python src/experiments/visualize_results.py --config configs/experiment.yaml
+#
+# 4. 生成LaTeX表格 / Generate LaTeX tables:
+#    python src/experiments/summarize_results.py --config configs/experiment.yaml
+
+# ============================================
+# 预期输出文件 / Expected Output Files
+# ============================================
+# outputs/ablation_study/
+# ├── sem1_freq1_gan1_cur1/          # 完整模型 / Full model
+# │   ├── images/                    # 增强图像 / Enhanced images
+# │   └── detailed_metrics.csv       # 详细指标 / Detailed metrics
+# ├── sem1_freq1_gan1_cur0/          # 无课程学习 / No curriculum
+# │   └── ...
+# ├── ... (其他15个消融组合 / other 15 ablations)
+# ├── ablation_summary.csv           # 消融摘要 / Ablation summary
+# ├── metrics_summary.csv            # 指标摘要 / Metrics summary
+# ├── visual_quality_report.txt      # 视觉质量报告 / Visual quality report
+# ├── statistics_summary.txt         # 统计摘要 / Statistics summary
+# ├── plots/                         # 可视化图表 / Visualization plots
+# │   ├── psnr_bar_chart.png
+# │   ├── ssim_bar_chart.png
+# │   ├── hpi_bar_chart.png
+# │   ├── metrics_line_plots.png
+# │   ├── radar_chart_top5.png
+# │   ├── correlation_heatmap.png
+# │   └── comprehensive_comparison.png
+# └── latex_tables/                  # LaTeX表格 / LaTeX tables
+#     ├── main_results_table.tex
+#     ├── ablation_components_table.tex
+#     └── top5_comparison_table.tex
+
+# ============================================
+# 注意事项 / Notes
+# ============================================
+# 1. 确保模型权重文件存在 / Ensure model weights file exists
+# 2. 确保数据集已下载到data目录 / Ensure datasets downloaded to data directory
+# 3. 完整实验可能需要数小时 / Complete experiment may take several hours
+# 4. 建议在GPU上运行 / Recommended to run on GPU
+# 5. 确保有足够的磁盘空间保存图像 / Ensure enough disk space for images
+# 6. 可以通过修改ablation配置来减少组合数量 / Can reduce combinations by modifying ablation config
+#
+# 示例：仅测试语义引导的影响 / Example: Only test semantic guidance impact
+# ablation:
+#   use_semantic: [true, false]
+#   use_freq: [true]
+#   use_gan: [true]
+#   use_curriculum: [true]
+# 这将只生成2个组合 / This will generate only 2 combinations
+
+# ============================================
+# 引用建议 / Citation Suggestion
+# ============================================
+# 如果使用此实验框架发表论文，请引用：
+# If publishing papers using this experiment framework, please cite:
+#
+# @article{semrocl2026,
+#   title={SemRoCL: Semantic-guided Robust Contrastive Learning for Low-Light Image Enhancement},
+#   author={Your Name},
+#   journal={IEEE Transactions on Image Processing},
+#   year={2026}
+# }

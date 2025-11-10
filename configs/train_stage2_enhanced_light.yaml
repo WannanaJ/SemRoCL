@@ -1,0 +1,167 @@
+exp_name: semantic_enhancement_stage2_LIGHT
+output_dir: outputs
+
+dataset:
+  root_dir: './data/stage2_paired'
+  datasets: ["LOL-v1", "LOL-v2", "FiveK"]
+  img_size: 352
+  mode: paired
+
+model:
+  base_encoder: resnet18
+  pretrained_encoder: outputs/moco_pretrain_stage1_LIGHT/checkpoints/moco_pretrain_final.pth
+  enhancer_channels: 28
+  num_iterations: 6
+  semantic_channels: 64
+  use_semantic: true
+  use_multiscale: true
+  num_scales: 2
+  lightweight: true
+  channel_multiplier: 0.75
+  use_depthwise: true
+  use_noise_gate: true
+  use_semantic_guidance: true
+  num_classes: 19
+  semantic_pretrained: true
+  finetune_semantic: false
+  semantic_feature_dim: 64
+  semantic_downsample: 2
+
+training:
+  epochs: 180
+  batch_size: 6
+  lr: 0.00008
+  lr_generator: 0.00008
+  lr_semantic: 0.00002
+  lr_discriminator: 0.000005
+  num_workers: 4
+  save_freq: 5
+  pin_memory: true
+  prefetch_factor: 2
+  persistent_workers: false
+  accumulate_steps: 2
+  disc_update_freq: 3
+  disc_update_threshold: 0.04
+  disc_start_epoch: 40
+  warmup_epochs: 10
+  use_cosine_schedule: true
+  gradient_clip: 0.5
+  gradient_clip_discriminator: 2.0
+  gradient_clip_semantic: 0.5
+  use_ema: true
+  ema_decay: 0.999
+  label_smoothing: true
+  real_label: 0.9
+  fake_label: 0.1
+
+curriculum:
+  enabled: true
+  adaptive: true
+  smart: true
+  adaptive_params:
+    psnr_threshold: 14.5
+    ssim_threshold: 0.42
+    patience: 3
+    speed_factor: 1.2
+    slow_factor: 0.8
+    min_weight_scale: 0.5
+    max_weight_scale: 1.4
+
+  phase1:
+    epochs: [1, 15]
+    description: "Warm-up with color + reconstruction"
+    loss_weights:
+      w_color: 0.0011
+      w_semantic: 0.0
+      w_adv: 0.0
+      w_freq: 0.00005
+      w_task: 0.0
+      w_perceptual: 0.004
+      w_recon: 1.0
+      w_brightness: 0.3
+
+  phase2:
+    epochs: [16, 40]
+    description: "Introduce semantic + perceptual terms"
+    loss_weights:
+      w_color: 0.0009
+      w_semantic: [0.0, 0.07]
+      w_adv: 0.0
+      w_freq: [0.00005, 0.00007]
+      w_task: 0.0
+      w_perceptual: [0.004, 0.02]
+      w_recon: [1.0, 0.8]
+      w_brightness: [0.25, 0.22]
+
+  phase3:
+    epochs: [41, 80]
+    description: "Strengthen semantic guidance"
+    loss_weights:
+      w_color: 0.00075
+      w_semantic: [0.07, 0.18]
+      w_adv: 0.0
+      w_freq: [0.00007, 0.0001]
+      w_task: 0.0
+      w_perceptual: [0.02, 0.06]
+      w_recon: [0.8, 0.6]
+      w_brightness: [0.22, 0.18]
+
+  phase4:
+    epochs: [81, 120]
+    description: "Add perceptual + mild adversarial"
+    loss_weights:
+      w_color: 0.00055
+      w_semantic: [0.18, 0.32]
+      w_adv: [0.0, 0.015]
+      w_freq: [0.0001, 0.00015]
+      w_task: 0.0
+      w_perceptual: [0.06, 0.15]
+      w_recon: [0.6, 0.45]
+      w_brightness: [0.18, 0.16]
+
+  phase5:
+    epochs: [121, 180]
+    description: "Full objective for refinement"
+    loss_weights:
+      w_color: 0.00035
+      w_semantic: [0.32, 0.45]
+      w_adv: [0.015, 0.035]
+      w_freq: [0.00015, 0.0002]
+      w_task: 0.0
+      w_perceptual: [0.15, 0.4]
+      w_recon: [0.45, 0.3]
+      w_brightness: [0.16, 0.12]
+
+loss:
+  w_color: 0.0003
+  w_semantic: 0.35
+  w_adv: 0.035
+  w_freq: 0.00005
+  w_task: 0.0
+  w_perceptual: 0.35
+  w_recon: 1.0
+  w_brightness: 0.2
+  color_loss:
+    weight_exp: 8
+    weight_color: 6
+    weight_tv: 240
+
+monitoring:
+  print_freq: 50
+  visualize_freq: 400
+  save_images_freq: 800
+  check_nan: true
+  max_grad_norm: 10.0
+  phase_transition_check: true
+  rollback_on_failure: false
+  safety:
+    max_psnr_drop: 3.0
+    max_d_loss_low_epochs: 10
+    max_lpips_increase: 0.15
+    nan_check_freq: 10
+    transition_grace_epochs: 4
+    enable_grace_period: true
+    max_total_loss: 45.0
+    loss_explosion_threshold: 8.0
+    stop_on_nan: true
+    stop_on_divergence: false

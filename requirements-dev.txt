@@ -1,0 +1,31 @@
+# ==========================================
+# SemRoCL Development Requirements
+# 开发和测试依赖
+# ==========================================
+
+# Include main requirements
+# 包含主要依赖
+-r requirements.txt
+
+# Testing
+# 测试框架
+pytest>=7.4.0
+pytest-cov>=4.1.0
+pytest-xdist>=3.3.0  # Parallel testing
+pytest-timeout>=2.1.0  # Test timeout
+pytest-mock>=3.11.0  # Mocking
+
+# Code Quality
+# 代码质量
+pylint>=2.17.0
+flake8>=6.0.0
+black>=23.0.0  # Code formatter
+isort>=5.12.0  # Import sorter
+mypy>=1.4.0  # Type checking
+
+# Documentation
+# 文档生成
+sphinx>=7.0.0
+sphinx-rtd-theme>=1.3.0  # ReadTheDocs theme
+sphinx-autodoc-typehints>=1.24.0
+myst-parser>=2.0.0  # Markdown support

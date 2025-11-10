@@ -1,0 +1,37 @@
+[MASTER]
+# Python code to execute during initialization
+init-hook='import sys; sys.path.append("src")'
+
+[MESSAGES CONTROL]
+# Disable specific warnings
+disable=
+    C0111,  # missing-docstring
+    C0103,  # invalid-name
+    R0913,  # too-many-arguments
+    R0914,  # too-many-locals
+    W0212,  # protected-access
+    C0330,  # bad-continuation
+    R0902,  # too-many-instance-attributes
+    R0903,  # too-few-public-methods
+    R0801,  # duplicate-code
+
+[FORMAT]
+# Maximum number of characters on a single line
+max-line-length=120
+
+# Maximum number of lines in a module
+max-module-lines=2000
+
+[BASIC]
+# Good variable names
+good-names=i,j,k,ex,Run,_,x,y,lr,fn
+
+[DESIGN]
+# Maximum number of arguments for function / method
+max-args=10
+
+# Maximum number of attributes for a class
+max-attributes=15
+
+# Maximum number of public methods for a class
+max-public-methods=30

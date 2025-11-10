@@ -1,0 +1,137 @@
+# ============================================
+# SemRoCL 多数据集消融实验配置文件
+# SemRoCL Multi-Dataset Ablation Experiment Configuration
+# ============================================
+
+# 实验基本信息 / Experiment Basic Information
+experiment:
+  name: semrocl_ablation_multi_dataset
+  description: "Comprehensive ablation study across 6 datasets"
+  mode: ablation
+
+  # 要测试的数据集列表 / List of datasets to test
+  # 将依次在每个数据集上运行完整的消融实验
+  # Will run complete ablation study on each dataset sequentially
+  datasets:
+    - name: Endo-LowLight
+      path: data/stage3_eval/Endo-LowLight
+      low_dir: low        # 低光照图像子目录
+      high_dir: normal    # 正常光照图像子目录（如果有参考图）
+      has_reference: true # 是否有参考图像
+
+    - name: ExDark
+      path: data/stage3_eval/ExDark
+      low_dir: low
+      high_dir: high
+      has_reference: true
+
+    - name: Learning-to-see-in-the-dark
+      path: data/stage3_eval/Learning-to-see-in-the-dark
+      low_dir: short     # 短曝光图像
+      high_dir: long     # 长曝光图像
+      has_reference: true
+
+    - name: LOLBlur
+      path: data/stage3_eval/LOLBlur
+      low_dir: low
+      high_dir: high
+      has_reference: true
+
+    - name: MEF
+      path: data/stage3_eval/MEF
+      low_dir: low
+      high_dir: high
+      has_reference: true
+
+    - name: SICE
+      path: data/stage3_eval/SICE
+      low_dir: low
+      high_dir: high
+      has_reference: true
+
+  # 模型权重路径 / Model weights path
+  weights: outputs/semantic_enhancement_stage2_ENHANCED/checkpoints/best_model.pth
+
+# 数据配置 / Data Configuration
+data:
+  batch_size: 1
+  num_workers: 0
+  shuffle: false
+
+# 消融配置 / Ablation Configuration
+# 可以选择简化版本以加快实验速度
+# Can choose simplified version to speed up experiments
+ablation:
+  # 完整版：16个组合 / Full version: 16 combinations
+  # use_semantic: [true, false]
+  # use_freq: [true, false]
+  # use_gan: [true, false]
+  # use_curriculum: [true, false]
+
+  # 简化版：只测试关键组合 / Simplified: only test key combinations
+  # 建议用于多数据集实验 / Recommended for multi-dataset experiments
+  use_semantic: [true, false]   # 语义引导最重要 / Semantic most important
+  use_freq: [true]               # 频域固定启用 / Frequency fixed enabled
+  use_gan: [true]                # GAN固定启用 / GAN fixed enabled
+  use_curriculum: [true]         # 课程学习固定启用 / Curriculum fixed enabled
+  # 这样只会生成2个消融组合 / This generates only 2 ablation combinations
+
+# 评估指标配置 / Evaluation Metrics Configuration
+metrics:
+  - psnr
+  - ssim
+  - lpips
+  - niqe
+  - brisque
+  - delta_e
+  - hpi
+
+# 输出配置 / Output Configuration
+output:
+  # 每个数据集都会有独立的输出目录
+  # Each dataset will have independent output directory
+  base_dir: ./outputs/ablation_multi_dataset
+  save_images: true
+  save_detailed: true
+  save_csv: true
+  save_tex: true
+  save_plots: true
+
+# 设备配置 / Device Configuration
+device:
+  type: auto
+  gpu_id: 0
+
+# 日志配置 / Logging Configuration
+logging:
+  level: INFO
+  console: true
+  file: true
+
+# 高级配置 / Advanced Configuration
+advanced:
+  use_amp: false
+  seed: 42
+  deterministic: false
+  memory_efficient: true
+
+# 可视化配置 / Visualization Configuration
+visualization:
+  dpi: 300
+  format: png
+  radar_top_n: 5
+  color_palette: husl
+
+# LaTeX表格配置 / LaTeX Table Configuration
+latex:
+  style: booktabs
+  decimal_places:
+    psnr: 2
+    ssim: 4
+    lpips: 4
+    niqe: 4
+    brisque: 2
+    delta_e: 2
+    hpi: 4
+  show_std: true
+  bold_best: true

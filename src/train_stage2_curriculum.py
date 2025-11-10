@@ -20,14 +20,29 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from torch.cuda.amp import GradScaler, autocast
-from torch.utils.tensorboard import SummaryWriter
+from torch.utils.tensorboard.writer import SummaryWriter
 
 import numpy as np
 from tqdm import tqdm
 import csv
 import warnings
 warnings.filterwarnings("ignore")
+
+try:
+    from torch.amp import GradScaler  # type: ignore[attr-defined]
+    _GRADSCALER_NEW_API = True
+except ImportError:
+    from torch.cuda.amp import GradScaler  # type: ignore
+    _GRADSCALER_NEW_API = False
+from torch.cuda.amp import autocast
+
+# Helper to create GradScaler compatible with both APIs
+def create_grad_scaler(enabled: bool):
+    if not enabled:
+        return None
+    if _GRADSCALER_NEW_API:
+        return GradScaler(enabled=True)
+    return GradScaler(enabled=True)
 
 # Import custom modules with error handling
 try:
@@ -41,7 +56,7 @@ except ImportError as e:
     raise ImportError(f"Cannot import loss_functions: {e}. Please ensure loss_functions.py exists.")
 
 try:
-    from model.models import EnhancementGenerator, Discriminato
+    from model.models import EnhancementGenerator, Discriminator
 except ImportError as e:
     raise ImportError(f"Cannot import models: {e}. Please ensure models.py exists.")
 
@@ -99,8 +114,10 @@ class Stage2Trainer:
         
         # Mixed precision
         self.use_amp = torch.cuda.is_available()
-        self.scaler_g = GradScaler(enabled=self.use_amp) if self.use_amp else None
-        self.scaler_d = GradScaler(enabled=self.use_amp) if self.use_amp else None
+        self.scaler_g = create_grad_scaler(self.use_amp)
+        self.scaler_d = create_grad_scaler(self.use_amp)
+        if self.use_amp and (self.scaler_g is None or self.scaler_d is None):
+            raise RuntimeError("AMP is enabled but GradScaler could not be initialized.")
         
         # Training state
         self.current_epoch = 0
@@ -395,6 +412,8 @@ class Stage2Trainer:
             
             # Backward pass for generator
             if self.use_amp:
+                if self.scaler_g is None:
+                    raise RuntimeError("GradScaler expected but not initialized for generator.")
                 self.scaler_g.scale(losses_g['total']).backward()
             else:
                 losses_g['total'].backward()
@@ -402,19 +421,20 @@ class Stage2Trainer:
             # Update generator
             if should_train_g:
                 if self.use_amp:
-                    # IMPROVED: Better gradient clipping
+                    if self.scaler_g is None:
+                        raise RuntimeError("GradScaler expected but not initialized for generator.")
                     self.scaler_g.unscale_(self.optimizer_g)
                     grad_norm_g = self.clip_gradients_safely(
-                        self.generator, 
-                        self.gradient_clip_g, 
+                        self.generator,
+                        self.gradient_clip_g,
                         "Generator"
                     )
                     self.scaler_g.step(self.optimizer_g)
                     self.scaler_g.update()
                 else:
                     grad_norm_g = self.clip_gradients_safely(
-                        self.generator, 
-                        self.gradient_clip_g, 
+                        self.generator,
+                        self.gradient_clip_g,
                         "Generator"
                     )
                     self.optimizer_g.step()
@@ -446,11 +466,13 @@ class Stage2Trainer:
                     disc_loss = (real_loss + fake_loss) * 0.5
                 
                 if self.use_amp:
+                    if self.scaler_d is None:
+                        raise RuntimeError("GradScaler expected but not initialized for discriminator.")
                     self.scaler_d.scale(disc_loss).backward()
                     self.scaler_d.unscale_(self.optimizer_d)
                     grad_norm_d = self.clip_gradients_safely(
-                        self.discriminator, 
-                        self.gradient_clip_d, 
+                        self.discriminator,
+                        self.gradient_clip_d,
                         "Discriminator"
                     )
                     self.scaler_d.step(self.optimizer_d)
@@ -458,8 +480,8 @@ class Stage2Trainer:
                 else:
                     disc_loss.backward()
                     grad_norm_d = self.clip_gradients_safely(
-                        self.discriminator, 
-                        self.gradient_clip_d, 
+                        self.discriminator,
+                        self.gradient_clip_d,
                         "Discriminator"
                     )
                     self.optimizer_d.step()
@@ -604,23 +626,81 @@ class Stage2Trainer:
         print("="*70 + "\n")
     
     def save_sample_images(self, low, enhanced, target, epoch):
-        """Save sample images for visualization"""
+        """
+        Save sample images for visualization with artifact reduction
+
+        保存样本图像，应用降噪和后处理以减少伪影
+        Save sample images with denoising and post-processing to reduce artifacts
+        """
         import torchvision.utils as vutils
-        
+
+        # 对增强图像进行后处理，减少噪点和伪影
+        # Post-process enhanced image to reduce noise and artifacts
+        with torch.no_grad():
+            enhanced_processed = enhanced.clone()
+
+            # 应用轻微的高斯平滑减少噪点（在 tensor 层面）
+            # Apply slight Gaussian smoothing to reduce noise at tensor level
+            kernel_size = 3
+            sigma = 0.5
+            kernel = self._get_gaussian_kernel(kernel_size, sigma).to(enhanced.device)
+
+            # 对每个通道应用高斯滤波
+            # Apply Gaussian filter to each channel
+            for i in range(enhanced_processed.size(1)):
+                enhanced_processed[:, i:i+1] = F.conv2d(
+                    enhanced_processed[:, i:i+1],
+                    kernel,
+                    padding=kernel_size // 2
+                )
+
+            # 裁剪到有效范围
+            # Clamp to valid range
+            enhanced_processed = torch.clamp(enhanced_processed, 0, 1)
+
         # Take first image from batch
         low_img = low[0:1]
-        enhanced_img = enhanced[0:1]
+        enhanced_img = enhanced_processed[0:1]
         target_img = target[0:1]
-        
+
         # Create comparison grid
         comparison = torch.cat([low_img, enhanced_img, target_img], dim=3)
-        
-        # Save image
+
+        # Save image with high quality
         save_path = os.path.join(self.image_dir, f'epoch_{epoch:03d}_step_{self.global_step}.png')
-        vutils.save_image(comparison, save_path, normalize=False)
-        
+        vutils.save_image(comparison, save_path, normalize=False, format='PNG')
+
+        # 额外保存单独的高质量增强图像
+        # Save separate high-quality enhanced image
+        from utils import save_image
+        enhanced_path = os.path.join(self.image_dir, f'epoch_{epoch:03d}_step_{self.global_step}_enhanced.png')
+        save_image(enhanced_img, enhanced_path, quality=95, apply_post_processing=True)
+
         # Log to tensorboard
         self.writer.add_image('Images/Comparison', comparison[0], self.global_step)
+        self.writer.add_image('Images/Enhanced', enhanced_img[0], self.global_step)
+
+    def _get_gaussian_kernel(self, kernel_size: int, sigma: float):
+        """
+        生成高斯核用于平滑
+        Generate Gaussian kernel for smoothing
+        """
+        # 创建一维高斯核
+        # Create 1D Gaussian kernel
+        coords = torch.arange(kernel_size, dtype=torch.float32)
+        coords -= kernel_size // 2
+
+        g = torch.exp(-(coords ** 2) / (2 * sigma ** 2))
+        g /= g.sum()
+
+        # 创建二维高斯核
+        # Create 2D Gaussian kernel
+        kernel_2d = g[:, None] * g[None, :]
+        kernel_2d = kernel_2d / kernel_2d.sum()
+
+        # 重塑为卷积核格式 (out_channels, in_channels, H, W)
+        # Reshape to convolution kernel format
+        return kernel_2d.view(1, 1, kernel_size, kernel_size)
     
     def save_checkpoint(self, epoch: int, val_loss: float, is_best: bool = False):
         """Save training checkpoint"""
